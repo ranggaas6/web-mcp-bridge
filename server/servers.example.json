@@ -1,9 +1,9 @@
 {
-  "control_port": 8099,
+  "control_port": 8199,
   "servers": [
     {
       "name": "demo",
-      "port": 8090,
+      "port": 8190,
       "command": ["python", "server/examples/demo_mcp_server.py"]
     }
   ]
