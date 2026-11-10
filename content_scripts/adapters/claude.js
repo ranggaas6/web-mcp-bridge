@@ -1,11 +1,11 @@
 /**
- * claude.js — Adaptador para Claude Web (claude.ai).
- * El editor es ProseMirror (contenteditable).
+ * claude.js — Adapter for Claude Web (claude.ai).
+ * The editor is ProseMirror (contenteditable).
  */
 (() => {
   'use strict';
   const WMB = globalThis.WMB;
- 
+
   class ClaudeAdapter extends WMB.BaseAdapter {
     constructor() {
       super({
@@ -20,9 +20,7 @@
           ],
           sendButton: [
             'button[aria-label="Send message"]',
-            'button[aria-label="Enviar mensaje"]',
             'button[aria-label*="Send" i]',
-            'button[aria-label*="Enviar" i]',
           ],
           assistantMessages: [
             '.font-claude-response',
@@ -32,7 +30,6 @@
           ],
           stopButton: [
             'button[aria-label="Stop response"]',
-            'button[aria-label="Detener respuesta"]',
             'button[aria-label*="Stop" i]',
             'div[data-is-streaming="true"]',
           ],
