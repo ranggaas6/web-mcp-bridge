@@ -1,19 +1,17 @@
 /**
- * chatgpt.js — Adaptador para ChatGPT (chatgpt.com).
+ * chatgpt.js — Adapter for ChatGPT (chatgpt.com).
  *
- * Este adaptador usa su PROPIO observador (no el del adaptador base): la UI de ChatGPT cambia el contenedor de
- * los mensajes (visor de código) y la llamada `mcp_call` puede estar en un bloque de código, fuera del mensaje,
- * o en texto normal. Por eso se localiza por su TEXTO, no por selectores de mensaje.
+ * This adapter uses its OWN observer (not the base adapter's): the ChatGPT UI swaps the message container
+ * (code viewer) and the `mcp_call` call may live in a code block, outside the message, or in plain text.
+ * So it is located by its TEXT, not by message selectors.
  *
- *  - Cuando ChatGPT responde con texto normal, su Markdown se come las barras invertidas
- *    (`C:\\Users` → `C:\Users`) y el JSON deja de ser válido: se repara antes de parsearlo.
- *  - Anti-repetición SIN memoria persistente: una llamada se ejecuta una sola vez mientras siga visible en la
- *    página; cuando desaparece (otro chat, regenerar…) se olvida. Nada se guarda entre recargas, así que nunca
- *    bloquea una tarea nueva con un «ya se ejecutó».
- *  - Historial: si no ha habido actividad reciente (envío tuyo o generación en vivo), lo que hay en la página es
- *    antiguo y nunca se ejecuta, tarde lo que tarde en cargar.
- *
- * Si OpenAI cambia su interfaz, normalmente solo hay que añadir un selector a la lista correspondiente.
+ *  - When ChatGPT replies with plain text, its Markdown eats backslashes
+ *    (`C:\\Users` → `C:\Users`) and the JSON becomes invalid: it is repaired before parsing.
+ *  - Anti-repetition WITHOUT persistent memory: a call is executed only once while it stays visible on the
+ *    page; when it disappears (another chat, regenerate…) it is forgotten. Nothing is stored across reloads,
+ *    so a new task is never blocked by an "already executed".
+ *  - History: if there has been no recent activity (your send or live generation), what is on the page is
+ *    old and is never executed, no matter how long it takes to load.
  */
 (() => {
   'use strict';
@@ -21,16 +19,15 @@
 
   const USER_SEL = '[data-message-author-role="user"], [data-turn="user"]';
   const CACHE_MS = 300;
-  const STABLE_MS = 1200;     // el bloque debe quedar sin cambios este tiempo
-  const STUCK_MS = 2500;      // «generando» pegado: se da por terminado tras este tiempo estable
+  const STABLE_MS = 1200;
+  const STUCK_MS = 2500;
   const POLL_MS = 700;
-  const ACTIVE_MS = 180_000;  // una llamada solo es «nueva» si hubo actividad hace menos de esto
-  const FORGET_MS = 8000;     // una llamada ejecutada se olvida cuando lleva este tiempo sin estar en la página
+  const ACTIVE_MS = 180_000;
+  const FORGET_MS = 8000;
 
   const BLOCK_TAGS = new Set(['P', 'DIV', 'LI', 'UL', 'OL', 'PRE', 'TR', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'SECTION', 'ARTICLE']);
   const SKIP_TAGS = new Set(['BUTTON', 'SVG', 'STYLE', 'SCRIPT', 'NOSCRIPT']);
 
-  /** Texto «visible» de un nodo con saltos de línea por bloque / línea de código. */
   function extractText(root) {
     let out = '';
     const newline = () => { if (out && !out.endsWith('\n')) out += '\n'; };
@@ -49,7 +46,6 @@
     return out;
   }
 
-  /** Objetos JSON completos y válidos dentro de un texto (ignora lo que rodea al JSON). */
   function findJsonObjects(text) {
     const found = [];
     for (let i = 0; i < text.length; i += 1) {
@@ -68,7 +64,7 @@
         else if (ch === '}') {
           depth -= 1;
           if (depth === 0) {
-            try { found.push(JSON.parse(text.slice(i, j + 1))); i = j; } catch { /* no era JSON válido */ }
+            try { found.push(JSON.parse(text.slice(i, j + 1))); i = j; } catch { /* not valid JSON */ }
             break;
           }
         }
@@ -77,11 +73,8 @@
     return found;
   }
 
-  /** Arregla barras invertidas que el Markdown dejó sueltas dentro de strings JSON. */
   function fixString(raw) {
-    // Ruta de Windows (C:\...): todas las barras son separadores literales.
     if (/^[A-Za-z]:\\/.test(raw)) return raw.replace(/\\+/g, '\\\\');
-    // Resto: duplica solo las barras que no forman un escape JSON válido.
     return raw.replace(/\\(["\\/bfnrt]|u[0-9a-fA-F]{4})|\\/g, (m, valid) => (valid ? m : '\\\\'));
   }
 
@@ -100,12 +93,11 @@
     return out;
   }
 
-  /** Llamadas MCP de un texto: parser de la extensión; si falla, se reparan comillas/barras y se reintenta. */
   function parseCalls(text) {
     try {
       const direct = WMB.extractMcpCalls(text);
       if (direct?.length) return direct;
-    } catch { /* se prueban las variantes */ }
+    } catch { /* try variants */ }
 
     const clean = text.replace(/[“”]/g, '"').replace(/\u00a0/g, ' ');
     for (const variant of [text, repairBackslashes(clean)]) {
@@ -114,26 +106,21 @@
         try {
           const normalized = WMB.extractMcpCalls('```json\n' + JSON.stringify(obj) + '\n```');
           if (normalized?.length) return normalized;
-        } catch { /* siguiente candidato */ }
+        } catch { /* next candidate */ }
       }
     }
     return [];
   }
 
-  /**
-   * Texto que verá el observador base: el del mensaje y, si su JSON estaba roto por el Markdown,
-   * la llamada reparada añadida al final (determinista: el mismo mensaje da siempre el mismo texto).
-   */
   function messageText(element) {
     const text = extractText(element);
     if (!text.includes('mcp_call')) return text;
-    try { if (WMB.extractMcpCalls(text).length) return text; } catch { /* se intenta reparar */ }
+    try { if (WMB.extractMcpCalls(text).length) return text; } catch { /* try repair */ }
     const calls = parseCalls(text);
     if (!calls.length) return text;
     return `${text}\n${calls.map((call) => '```json\n' + JSON.stringify({ mcp_call: call }) + '\n```').join('\n')}`;
   }
 
-  /** Envuelve el elemento para que `textContent` devuelva el texto reconstruido (el resto se delega tal cual). */
   function wrap(element) {
     return new Proxy(element, {
       get(target, prop) {
@@ -145,10 +132,9 @@
     });
   }
 
-  /** ¿Es un elemento del asistente (ni del usuario, ni del formulario) con una llamada MCP real (no la plantilla del prompt)? */
   function isCallElement(el) {
     const raw = el.textContent || '';
-    return raw.includes('mcp_call') && !raw.includes('<servidor>')
+    return raw.includes('mcp_call') && !raw.includes('<server>')
       && !el.closest(USER_SEL) && !el.querySelector(USER_SEL) && !el.closest('form');
   }
 
@@ -173,23 +159,18 @@
           sendButton: [
             'button[data-testid="send-button"]',
             'button[aria-label*="Send" i]',
-            'button[aria-label*="Enviar" i]',
             'form button[type="submit"]',
           ],
-          // Se usan TODOS los que devuelvan elementos (no solo el primero).
           assistantMessages: [
             '[data-message-author-role="assistant"]',
             'article[data-turn="assistant"]',
             '[data-turn="assistant"]',
             'div.agent-turn',
           ],
-          // Solo el botón de «detener generación» (no el de dictado).
           stopButton: [
             'button[data-testid="stop-button"]',
             'button[aria-label*="Stop streaming" i]',
             'button[aria-label*="Stop generating" i]',
-            'button[aria-label*="Detener la transm" i]',
-            'button[aria-label*="Detener generaci" i]',
           ],
           fileInput: ['input[type="file"]'],
         },
@@ -200,18 +181,13 @@
       return hostname === 'chatgpt.com' || hostname.endsWith('.chatgpt.com') || hostname === 'chat.openai.com';
     }
 
-    /**
-     * Mensajes del asistente en orden de documento, sin anidados (se queda el contenedor más externo),
-     * con el texto reconstruido y reparado. Incluye los bloques/textos con `mcp_call` que queden fuera de
-     * los contenedores conocidos.
-     */
     getAssistantMessages() {
       const now = Date.now();
       if (this.#cache && now - this.#cache.time < CACHE_MS) return this.#cache.list;
 
       const containers = new Set();
       for (const selector of this.selectors.assistantMessages) {
-        try { document.querySelectorAll(selector).forEach((el) => containers.add(el)); } catch { /* selector inválido */ }
+        try { document.querySelectorAll(selector).forEach((el) => containers.add(el)); } catch { /* invalid selector */ }
       }
       const known = [...containers].filter((el) => !el.closest(USER_SEL) && !el.querySelector(USER_SEL));
       const extras = this.#callElements().filter((el) => !known.some((c) => c.contains(el)));
@@ -225,26 +201,19 @@
       return list;
     }
 
-    /**
-     * Observa las respuestas. Misma interfaz que el adaptador base:
-     * `callback({id, call, element})` por cada llamada MCP nueva; `onDone({text, element})` por respuesta sin llamada.
-     * @returns {() => void} detiene la observación
-     */
     observeResponses(callback, { onDone } = {}) {
       let alive = true;
       let scheduled = false;
       let lastDone = '';
-      const done = new Map();       // id de llamada ya tratada → {absentSince}
-      const seen = new WeakMap();   // elemento → {text, since}
-      const say = (message) => { try { this.debug?.('ok', `ChatGPT · ${message}`); } catch { /* sin panel */ } };
+      const done = new Map();
+      const seen = new WeakMap();
+      const say = (message) => { try { this.debug?.('ok', `ChatGPT · ${message}`); } catch { /* no panel */ } };
       const convOf = () => (location.pathname.match(/\/c\/([^/?#]+)/) || [])[1] || null;
       let conv = convOf();
 
       const scan = () => {
         const now = Date.now();
 
-        // Cambio de conversación (a otra o a «chat nuevo»): se empieza de cero. Un chat nuevo que recibe su URL
-        // (/ → /c/<id>) NO cuenta como cambio.
         const nowConv = convOf();
         if (nowConv !== conv) {
           if (conv !== null) { done.clear(); this.lastActivity = 0; lastDone = ''; }
@@ -269,7 +238,6 @@
           const ready = baseline || (stableFor >= STABLE_MS && (!streaming || stableFor >= STUCK_MS));
 
           calls.forEach((call, n) => {
-            // ID = la llamada + cuántas idénticas hay antes en la página (no depende de URL ni de IDs de mensaje).
             const hash = WMB.hash(JSON.stringify(call));
             const occurrence = tally.get(hash) ?? 0;
             tally.set(hash, occurrence + 1);
@@ -278,27 +246,22 @@
             if (!ready) return;
             let fireId = id;
             if (done.has(id)) {
-              // Llamada identica a una ya ejecutada: solo es una repeticion real (la IA espera respuesta otra vez) si contesto despues
-              // de recibir el resultado y este es su ultimo bloque; si no, es un repintado de la pagina.
               if (baseline || streaming || n !== 0 || el !== blocks[blocks.length - 1] || !this.genSinceDelivery) return;
               fireId = `${id}~r${this.deliveries}`;
               if (done.has(fireId)) return;
               present.add(fireId);
             }
             done.set(fireId, { absentSince: 0 });
-            // Protocolo: una llamada por mensaje → solo se ejecuta la primera. En línea base solo se memoriza.
-            if (!baseline && n === 0) { say('llamada detectada, ejecutando…'); callback({ id: fireId, call, element: wrap(el) }); }
+            if (!baseline && n === 0) { say('call detected, executing…'); callback({ id: fireId, call, element: wrap(el) }); }
           });
         }
 
-        // Se olvidan las llamadas que ya no están en la página (así repetir una tarea nunca queda bloqueado).
         for (const [id, entry] of done) {
           if (present.has(id)) entry.absentSince = 0;
           else if (!entry.absentSince) entry.absentSince = now;
           else if (now - entry.absentSince >= FORGET_MS) done.delete(id);
         }
 
-        // Respuesta terminada SIN llamada MCP.
         if (!baseline && !streaming && onDone) {
           const messages = this.getAssistantMessages();
           let last = -1;
@@ -345,14 +308,12 @@
       };
     }
 
-    /** Elementos con una llamada MCP localizados por su texto: bloques <pre> y, si no, el texto normal. */
     #callElements() {
       const found = Array.from(document.querySelectorAll('pre')).filter(isCallElement);
 
-      // Texto normal: se busca el nodo de texto con «mcp_call» y se sube hasta el elemento cuyo texto contiene una llamada válida.
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!/mcp_call|"server"\s*:/.test(node.nodeValue) || node.nodeValue.includes('<servidor>')) continue;
+        if (!/mcp_call|"server"\s*:/.test(node.nodeValue) || node.nodeValue.includes('<server>')) continue;
         let el = node.parentElement;
         if (!el || el.closest(USER_SEL) || el.closest('form') || el.closest('[contenteditable="true"]')) continue;
         for (let depth = 0; el && depth < 10 && el !== document.body && el.tagName !== 'MAIN'; depth += 1, el = el.parentElement) {
