@@ -383,6 +383,78 @@ function renderGlobalPermission(servers) {
 }
 $('#perm-all').addEventListener('change', guard((e) => api('SET_ALL_PERMISSIONS', { permission: e.target.value })));
 
+// ───────────────────────── Notices ─────────────────────────
+
+const LEVEL_TEXT = { info: 'News', update: 'New version', warning: 'Important' };
+let noticesSig = '';
+
+function renderNotices(state) {
+  const data = state.notices ?? { items: [], unread: 0 };
+  const badge = $('#notices-badge');
+  badge.hidden = !data.unread;
+  badge.textContent = data.unread > 9 ? '9+' : String(data.unread);
+
+  const sig = JSON.stringify([data.items, data.checkedAt, data.error]);
+  if (sig === noticesSig) return;
+  noticesSig = sig;
+
+  const list = $('#notice-list');
+  list.replaceChildren();
+  $('#notices-empty').hidden = data.items.length > 0;
+  $('#read-all').hidden = !data.unread;
+
+  for (const n of data.items) {
+    const li = document.createElement('li');
+    li.className = `notice ${n.level}${n.unread ? ' unread' : ''}`;
+    const title = document.createElement('div');
+    title.className = 'n-title';
+    title.textContent = n.title;
+    const date = document.createElement('div');
+    date.className = 'n-date';
+    date.textContent = [LEVEL_TEXT[n.level], n.date ? new Date(n.date).toLocaleDateString('en', { day: 'numeric', month: 'short', year: 'numeric' }) : null].filter(Boolean).join(' · ');
+    li.append(title, date);
+    if (n.message) {
+      const msg = document.createElement('div');
+      msg.className = 'n-msg';
+      msg.textContent = n.message;
+      li.append(msg);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'n-actions';
+    if (n.url) {
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'primary small';
+      open.textContent = 'View on GitHub';
+      open.addEventListener('click', guard(async () => { openLink(n.url); await api('READ_NOTICES', { ids: [n.id] }); }));
+      actions.append(open);
+    }
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'soft small';
+    dismiss.textContent = 'Dismiss';
+    dismiss.addEventListener('click', guard(() => api('DISMISS_NOTICE', { id: n.id })));
+    actions.append(dismiss);
+    li.append(actions);
+    list.append(li);
+  }
+
+  const when = data.checkedAt ? `Checked ${new Date(data.checkedAt).toLocaleString('en', { dateStyle: 'short', timeStyle: 'short' })}` : 'Not checked yet';
+  $('#notices-line').textContent = data.error ? `${data.error}` : when;
+}
+$('#read-all').addEventListener('click', guard(() => api('READ_NOTICES', { ids: 'all' })));
+$('#check-notices').addEventListener('click', async (event) => {
+  const btn = event.currentTarget;
+  setBusy(btn, true);
+  try {
+    const res = await api('CHECK_NOTICES');
+    toast(res.count ? `There ${res.count === 1 ? 'is' : 'are'} ${res.count} current notice${res.count === 1 ? '' : 's'}.` : 'No new notices.');
+  } catch (err) { toast(err.message, 5000); }
+  setBusy(btn, false);
+  noticesSig = '';
+  await refresh(true);
+});
+
 // ───────────────────────── History ─────────────────────────
 
 let historySig = '';
@@ -427,6 +499,7 @@ function renderSettings(state) {
   $('#set-autoDiscover').checked = settings.autoDiscover !== false;
   $('#set-autoEnableDiscovered').checked = Boolean(settings.autoEnableDiscovered);
   $('#set-focusFallback').checked = settings.focusFallback;
+  $('#set-showNotices').checked = settings.showNotices !== false;
   if (document.activeElement?.id !== 'set-reinjectEvery') $('#set-reinjectEvery').value = settings.reinjectEvery;
   if (document.activeElement?.id !== 'set-responseDelaySec') $('#set-responseDelaySec').value = (settings.responseDelayMs ?? 1500) / 1000;
 
@@ -438,7 +511,7 @@ $('#gh-link').addEventListener('click', (e) => { e.preventDefault(); openLink('h
 
 $('#master').addEventListener('change', guard((e) => api('UPDATE_SETTINGS', { settings: { bridgeEnabled: e.target.checked } })));
 
-for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'autoDiscover', 'autoEnableDiscovered']) {
+for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'autoDiscover', 'autoEnableDiscovered', 'showNotices']) {
   $(`#set-${key}`).addEventListener('change', guard((e) => api('UPDATE_SETTINGS', { settings: { [key]: e.target.checked } })));
 }
 $('#set-reinjectEvery').addEventListener('change', guard((e) => {
@@ -493,7 +566,7 @@ async function refresh(force = false) {
   try {
     const state = await api('GET_STATE');
     latest = state;
-    const sig = JSON.stringify([state.version, state.settings, state.bridge,
+    const sig = JSON.stringify([state.version, state.notices, state.settings, state.bridge,
       state.servers.map((s) => [s.id, s.name, s.url, s.enabled, s.permission, s.status, s.toolCount, s.auto, s.error, s.bridgeStatus, s.bridgeError])]);
     if (force || sig !== lastSig) {
       lastSig = sig;
@@ -501,6 +574,7 @@ async function refresh(force = false) {
       renderServers(state);
       renderGlobalPermission(state.servers);
       renderSettings(state);
+      renderNotices(state);
     }
     if (currentTab === 'history') await renderHistory();
   } catch (err) { toast(err.message); }
