@@ -62,6 +62,8 @@ export const DEFAULT_SETTINGS = {
   autoEnableDiscovered: false,
   /** Puerto de control del puente del fork. */
   controlPort: DEFAULT_CONTROL_PORT,
+  /** Puerto del lanzador del fork. Crucial: debe coincidir con `launcher_port` en servers.json. */
+  launcherPort: DEFAULT_LAUNCHER_PORT,
   /** Muestra los avisos del autor del fork. */
   showNotices: true,
   /** Pausa (ms) antes de entregar cada resultado al chat. */
@@ -72,7 +74,7 @@ export const DEFAULT_SETTINGS = {
 export const RESPONSE_DELAY_MAX_MS = 60_000;
 
 /** El servidor de prueba incluido en el repositorio (server/examples/demo_mcp_server.py). */
-export const DEMO_SERVER = { name: 'demo', url: 'ws://localhost:8090' };
+export const DEMO_SERVER = { name: 'demo', url: 'ws://localhost:8190' };
 
 /**
  * Avisos del autor: ahora apunta al repo fork, no al upstream.
