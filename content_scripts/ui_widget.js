@@ -1,9 +1,9 @@
 /**
- * ui_widget.js — Panel flotante dentro de la página (Shadow DOM, sin conflictos de estilos).
+ * ui_widget.js — Floating panel inside the page (Shadow DOM, no style conflicts).
  *
- * Muestra el estado de los MCP activos, permite inyectar las instrucciones y elegir el permiso
- * de cada MCP (permitir siempre · preguntar siempre · no permitir). Con «preguntar» pide
- * APROBACIÓN antes de cada herramienta (human-in-the-loop).
+ * Shows active MCP status, lets you inject instructions and choose the permission
+ * for each MCP (always allow · always ask · block). With "ask" it requests
+ * APPROVAL before each tool (human-in-the-loop).
  */
 (() => {
   'use strict';
@@ -20,7 +20,7 @@
     return el;
   };
 
-  const PERMS = [['allow', 'Permitir siempre'], ['ask', 'Preguntar siempre'], ['deny', 'No permitir']];
+  const PERMS = [['allow', 'Always allow'], ['ask', 'Always ask'], ['deny', 'Block']];
 
   const CSS = `
     :host { all: initial; }
@@ -71,13 +71,11 @@
       margin: 6px 0; padding: 8px; max-height: 140px; overflow: auto; white-space: pre-wrap; word-break: break-word;
       background: rgba(127,127,127,.12); border-radius: 6px; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace;
     }
-    /* v1.7.1: el panel no tiene barra de scroll; solo el historial (logs) se desplaza por dentro */
     .panel > ul.log { flex: 0 1 auto; min-height: 56px; max-height: 210px; overflow-y: auto; overscroll-behavior: contain; padding-right: 6px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
     ul.log::-webkit-scrollbar { width: 5px; }
     ul.log::-webkit-scrollbar-track { background: transparent; }
     ul.log::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
     ul.log::-webkit-scrollbar-thumb:hover { background: var(--muted); }
-    /* v1.7.2: con una aprobación pendiente la tarjeta sube arriba y su bloque de código se compacta; los botones siempre se ven */
     .approvals { flex: none; }
     .approvals .card { margin: 0 0 8px; }
     .panel.has-approval .card pre { max-height: 96px; }
@@ -104,7 +102,7 @@
       this.selectFocusedAt = 0;
 
       this.host = document.createElement('div');
-      this.host.id = 'wmb-host';
+      this.host.id = 'wmbx-host';
       this.shadow = this.host.attachShadow({ mode: 'closed' });
       this.root = h('div', { class: 'wrap' });
       this.shadow.append(h('style', {}, CSS), this.root);
@@ -113,9 +111,8 @@
       this.render();
     }
 
-    // ═════════════════════════════ Arrastre de la ventana ═════════════════════════════
-    // La pill es el asa. La posición se recuerda por URL en sessionStorage; doble clic la resetea.
-    #posKey() { return `wmb-widget-pos:${location.origin}${location.pathname}`; }
+    // ═════════════════════════════ Drag ═════════════════════════════
+    #posKey() { return `wmbx-widget-pos:${location.origin}${location.pathname}`; }
 
     #applyPosition(pos) {
       if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') {
@@ -123,7 +120,6 @@
         this.root.style.removeProperty('--y');
         return;
       }
-      // Guardamos con left/top. Como el default es bottom, pasamos a top para que sea estable al arrastrar.
       const w = this.root.getBoundingClientRect().width || 0;
       const hgt = this.root.getBoundingClientRect().height || 0;
       const x = Math.min(Math.max(0, pos.x), Math.max(0, window.innerWidth - w));
@@ -134,7 +130,7 @@
     }
 
     #savePosition(x, y) {
-      try { sessionStorage.setItem(this.#posKey(), JSON.stringify({ x, y })); } catch { /* almacenamiento no disponible */ }
+      try { sessionStorage.setItem(this.#posKey(), JSON.stringify({ x, y })); } catch { /* storage unavailable */ }
     }
 
     #resetPosition() {
@@ -144,14 +140,12 @@
       this.root.style.removeProperty('bottom');
     }
 
-    // Empuja el conjunto (pill + panel si está abierto) dentro del viewport.
-    // Prioridad: mantenerlo lo más cerca posible de donde está, sin salirse.
     #fitToViewport() {
       const r = this.root.getBoundingClientRect();
       const vw = window.innerWidth, vh = window.innerHeight;
       let dx = 0, dy = 0;
       if (r.right > vw) dx -= (r.right - vw);
-      if (r.left < 0) dx -= r.left; // si cabe entero, deja a 0
+      if (r.left < 0) dx -= r.left;
       if (r.bottom > vh) dy -= (r.bottom - vh);
       if (r.top < 0) dy -= r.top;
       if (dx === 0 && dy === 0) return;
@@ -163,13 +157,11 @@
     }
 
     #initDrag() {
-      // Restaurar posición previa (si la hay) en cuanto haya layout.
       requestAnimationFrame(() => {
         try {
           const raw = sessionStorage.getItem(this.#posKey());
           if (raw) this.#applyPosition(JSON.parse(raw));
         } catch { /* ignore */ }
-        // Reclampear al redimensionar la ventana
         window.addEventListener('resize', () => {
           const raw = sessionStorage.getItem(this.#posKey());
           if (!raw) return;
@@ -177,9 +169,7 @@
         }, { passive: true });
       });
 
-      // Delegación de eventos: el asa es la pill (o su contenido).
       this.root.addEventListener('pointerdown', (e) => this.#onPointerDown(e));
-      // Doble clic en la pill → volver al default
       this.root.addEventListener('dblclick', (e) => {
         if (e.target.closest('.pill')) { this.#resetPosition(); }
       });
@@ -187,7 +177,6 @@
 
     #onPointerDown(e) {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
-      // Asa: la pill completa, o el head del panel (excepto sus botones).
       let handle = e.target.closest('.pill');
       if (!handle) {
         const head = e.target.closest('.head[data-drag]');
@@ -202,23 +191,21 @@
       const origX = rect.left, origY = rect.top;
       let moved = false;
       this.root.classList.add('dragging');
-      try { handle.setPointerCapture(e.pointerId); } catch { /* navegadores antiguos */ }
+      try { handle.setPointerCapture(e.pointerId); } catch { /* old browsers */ }
 
       const onMove = (ev) => {
         const dx = ev.clientX - startX;
         const dy = ev.clientY - startY;
-        if (!moved && Math.hypot(dx, dy) < 4) return; // umbral anti-click
+        if (!moved && Math.hypot(dx, dy) < 4) return;
         moved = true;
         this.root.style.setProperty('--x', `${Math.round(origX + dx)}px`);
         this.root.style.setProperty('--y', `${Math.round(origY + dy)}px`);
         this.root.style.setProperty('bottom', 'auto');
-        // Reajustar al viewport teniendo en cuenta el conjunto completo (pill+panel).
         this.#fitToViewport();
       };
       const onUp = () => {
         try { handle.releasePointerCapture(e.pointerId); } catch { /* noop */ }
         this.root.classList.remove('dragging');
-        // Listeners en document: no dependen de que la pill siga existiendo tras un render().
         document.removeEventListener('pointermove', onMove, true);
         document.removeEventListener('pointerup', onUp, true);
         document.removeEventListener('pointercancel', onUp, true);
@@ -237,11 +224,11 @@
 
     log(kind, text) {
       this.logs.unshift({ kind, text, ts: new Date() });
-      this.logs.length = Math.min(this.logs.length, MAX_LOGS); // historial temporal (solo en memoria): se pierde al recargar la pagina
+      this.logs.length = Math.min(this.logs.length, MAX_LOGS);
       this.render();
     }
 
-    /** Pide confirmación al usuario. Resuelve `true` (ejecutar), `'always'` (ejecutar y permitir siempre) o `false` (rechazar). */
+    /** Requests user confirmation. Resolves `true` (run), `'always'` (run and always allow) or `false` (reject). */
     requestApproval(call) {
       return new Promise((resolve) => {
         this.approvals.push({ call, resolve });
@@ -250,21 +237,17 @@
       });
     }
 
-    // ───────────── Render ─────────────
-
     render(force = false) {
-      // v1.7.0 (B7): con el interruptor general apagado el panel NO aparece (ni siquiera con una etiqueta de 'desactivado').
       const visible = this.model.bridgeEnabled !== false;
       this.host.style.setProperty('display', visible ? '' : 'none', visible ? '' : 'important');
       if (!visible) { this.open = false; }
-      // No cerrar un desplegable mientras se usa, pero SOLO unos segundos: un <select> con el foco no puede congelar el panel.
       if (!force && this.shadow.activeElement?.tagName === 'SELECT' && Date.now() - this.selectFocusedAt < 6000) return;
       const { servers, toolCount } = this.model;
       const pending = this.approvals.length;
       const bridgeDown = Boolean(this.model.bridge?.checked && !this.model.bridge.online);
-      const activeLabel = !this.model.bridgeEnabled ? 'Bridge desactivado' : bridgeDown ? 'Puente apagado' : servers.length
-        ? `${servers.length} MCP · ${toolCount} herramientas`
-        : 'Sin MCP activos';
+      const activeLabel = !this.model.bridgeEnabled ? 'Bridge disabled' : bridgeDown ? 'Bridge off' : servers.length
+        ? `${servers.length} MCP · ${toolCount} tools`
+        : 'No active MCPs';
       const allUp = servers.length > 0 && servers.every((s) => s.status === 'connected');
 
       const pill = h('button', {
@@ -273,70 +256,69 @@
         onclick: () => { if (this._suppressClickUntil && Date.now() < this._suppressClickUntil) return; this.open = !this.open; this.render(); },
       },
       h('i', { class: `dot ${pending ? 'warn' : allUp && this.model.bridgeEnabled ? 'ok' : ''}` }),
-      h('span', {}, pending ? `${pending} llamada${pending > 1 ? 's' : ''} por aprobar` : activeLabel));
+      h('span', {}, pending ? `${pending} call${pending > 1 ? 's' : ''} awaiting approval` : activeLabel));
 
-      const logScroll = this.root.querySelector('ul.log')?.scrollTop ?? 0; // conservar la posicion del historial entre refrescos
+      const logScroll = this.root.querySelector('ul.log')?.scrollTop ?? 0;
       this.root.replaceChildren(...(this.open ? [this.#panel()] : []), pill);
       const logList = this.root.querySelector('ul.log');
       if (logList && logScroll) logList.scrollTop = logScroll;
-      // Al abrir (o si quedó fuera), ajustar para que nada quede fuera de pantalla.
       if (this.open) requestAnimationFrame(() => this.#fitToViewport());
     }
 
-    /** Selector de 3 estados. `value` puede ser 'mixed' cuando los MCP tienen permisos distintos. */
+    /** 3-state selector. `value` can be 'mixed' when MCPs have different permissions. */
     #permSelect(value, onChange, label) {
       const options = PERMS.map(([v, text]) => h('option', { value: v, selected: v === value ? '' : false }, text));
-      if (value === 'mixed') options.unshift(h('option', { value: 'mixed', selected: '', disabled: '' }, 'Mixto'));
+      if (value === 'mixed') options.unshift(h('option', { value: 'mixed', selected: '', disabled: '' }, 'Mixed'));
       return h('select', {
         class: value,
         'aria-label': label,
         onfocus: () => { this.selectFocusedAt = Date.now(); },
-        onchange: (e) => { const { value: chosen } = e.target; e.target.blur(); onChange(chosen); }, // soltar el foco: el panel vuelve a repintarse
+        onchange: (e) => { const { value: chosen } = e.target; e.target.blur(); onChange(chosen); },
         onblur: () => { this.selectFocusedAt = 0; this.render(true); },
       }, options);
     }
 
-    /** v1.7.0 · Selector del tiempo de respuesta (pausa antes de entregar cada resultado a la IA). */
+    /** Response delay selector (pause before delivering each result to the AI). */
     #delaySelect() {
       const current = Number(this.model.responseDelayMs) || 0;
-      const steps = [[0, 'Al instante'], [1000, '1 s'], [1500, '1,5 s'], [2000, '2 s'], [3000, '3 s'], [5000, '5 s'], [8000, '8 s'], [10000, '10 s'], [15000, '15 s'], [30000, '30 s']];
+      const steps = [[0, 'Instant'], [1000, '1 s'], [1500, '1.5 s'], [2000, '2 s'], [3000, '3 s'], [5000, '5 s'], [8000, '8 s'], [10000, '10 s'], [15000, '15 s'], [30000, '30 s']];
       if (!steps.some(([ms]) => ms === current)) steps.push([current, `${(current / 1000).toFixed(1)} s`]);
       steps.sort((a, b) => a[0] - b[0]);
       return h('select', {
-        'aria-label': 'Tiempo de respuesta',
-        title: 'Pausa antes de devolver cada resultado a la IA. Súbelo si la IA se satura o da «Too many requests».',
+        'aria-label': 'Response delay',
+        title: 'Pause before returning each result to the AI. Raise it if the AI saturates or says "Too many requests".',
         onfocus: () => { this.selectFocusedAt = Date.now(); },
         onchange: (e) => { const ms = Number(e.target.value); e.target.blur(); this.handlers.onSetDelay?.(ms); },
         onblur: () => { this.selectFocusedAt = 0; this.render(true); },
       }, steps.map(([ms, text]) => h('option', { value: String(ms), selected: ms === current ? '' : false }, text)));
     }
 
-    /** v1.7.0 · Control GLOBAL del puente: encender / apagar / reiniciar el PROCESO (funciona esté como esté). */
+    /** Global bridge control: start / stop / restart the PROCESS. */
     #bridgeSection() {
       const { bridge, bridgeBusy } = this.model;
       const checked = Boolean(bridge?.checked);
       const online = Boolean(bridge?.online);
       const busy = Boolean(bridgeBusy);
-      const stateText = !checked ? 'comprobando…' : online ? `encendido${bridge.pid ? ` (pid ${bridge.pid})` : ''}` : 'apagado';
+      const stateText = !checked ? 'checking…' : online ? `on${bridge.pid ? ` (pid ${bridge.pid})` : ''}` : 'off';
       const act = (action) => () => { if (!busy) this.handlers.onBridgeAction?.(action); };
       return h('div', { class: 'bridge' },
         h('div', { class: 'perm', style: 'margin-top:0' },
-          h('strong', {}, 'Puente'),
+          h('strong', {}, 'Bridge'),
           h('span', { class: 'muted state' }, h('i', { class: `dot ${online ? 'ok' : ''}` }), stateText)),
         h('div', { class: 'row' },
           online
-            ? h('button', { class: 'danger', disabled: busy ? '' : false, onclick: act('stop') }, bridgeBusy === 'stop' ? 'Apagando…' : 'Apagar')
-            : h('button', { class: 'primary', disabled: busy ? '' : false, onclick: act('start') }, bridgeBusy === 'start' ? 'Encendiendo…' : 'Encender'),
-          h('button', { disabled: busy ? '' : false, onclick: act('restart') }, bridgeBusy === 'restart' ? 'Reiniciando…' : (online ? 'Reiniciar' : 'Reiniciar / encender'))),
-        h('div', { class: 'perm' }, h('strong', {}, 'Tiempo de respuesta'), this.#delaySelect()));
+            ? h('button', { class: 'danger', disabled: busy ? '' : false, onclick: act('stop') }, bridgeBusy === 'stop' ? 'Stopping…' : 'Stop')
+            : h('button', { class: 'primary', disabled: busy ? '' : false, onclick: act('start') }, bridgeBusy === 'start' ? 'Starting…' : 'Start'),
+          h('button', { disabled: busy ? '' : false, onclick: act('restart') }, bridgeBusy === 'restart' ? 'Restarting…' : (online ? 'Restart' : 'Restart / start'))),
+        h('div', { class: 'perm' }, h('strong', {}, 'Response delay'), this.#delaySelect()));
     }
 
     #panel() {
-      const { servers, injection, adapterName, bridgeEnabled } = this.model;
+      const { servers, injection, adapterName } = this.model;
       const injectionText = {
-        none: 'Las instrucciones se añadirán solas al enviar tu próximo mensaje.',
-        ok: 'Instrucciones inyectadas y al día.',
-        stale: 'Los MCP activos cambiaron: vuelve a inyectar las instrucciones.',
+        none: 'Instructions will be added automatically when you send your next message.',
+        ok: 'Instructions injected and up to date.',
+        stale: 'Active MCPs changed: inject the instructions again.',
       }[injection];
       const perms = new Set(servers.map((s) => s.permission));
       const common = perms.size === 1 ? [...perms][0] : 'mixed';
@@ -344,46 +326,45 @@
       return h('div', { class: `panel${this.approvals.length ? ' has-approval' : ''}`, role: 'dialog', 'aria-label': 'Web MCP Bridge' },
         h('div', { class: 'head', 'data-drag': '1', style: 'cursor: move;' },
           h('strong', {}, `Web MCP Bridge · ${adapterName}`),
-          h('button', { 'aria-label': 'Cerrar', onclick: () => { this.open = false; this.render(true); } }, '✕')),
+          h('button', { 'aria-label': 'Close', onclick: () => { this.open = false; this.render(true); } }, '✕')),
 
         this.#approvalSection(),
 
         servers.length
           ? h('ul', {}, servers.map((s) => h('li', { class: 'srv' },
             h('i', { class: `dot ${s.status === 'connected' ? 'ok' : s.status === 'connecting' ? 'warn' : ''}` }),
-            h('span', { class: 'grow' }, s.name, h('span', { class: 'muted' }, s.permission === 'deny' ? ' · bloqueado' : s.status === 'connected' ? ` · ${s.toolCount} herr.` : ' · sin conexión')),
-            this.#permSelect(s.permission, (value) => this.handlers.onSetPermission(s.id, value), `Permiso de ${s.name}`))))
-          : h('p', { class: 'muted' }, 'Abre el icono de la extensión y activa un servidor MCP.'),
+            h('span', { class: 'grow' }, s.name, h('span', { class: 'muted' }, s.permission === 'deny' ? ' · blocked' : s.status === 'connected' ? ` · ${s.toolCount} tools` : ' · disconnected')),
+            this.#permSelect(s.permission, (value) => this.handlers.onSetPermission(s.id, value), `Permission for ${s.name}`))))
+          : h('p', { class: 'muted' }, 'Open the extension icon and enable an MCP server.'),
 
         servers.length > 1
-          ? h('div', { class: 'perm' }, h('strong', {}, 'Todos los MCP'),
-            this.#permSelect(common, (value) => this.handlers.onSetPermission(null, value), 'Permiso de todos los MCP'))
+          ? h('div', { class: 'perm' }, h('strong', {}, 'All MCPs'),
+            this.#permSelect(common, (value) => this.handlers.onSetPermission(null, value), 'Permission for all MCPs'))
           : null,
 
         this.#bridgeSection(),
 
         h('p', { class: 'muted' }, injectionText),
         h('div', { class: 'row' },
-          h('button', { class: 'primary', onclick: () => this.handlers.onInject() }, 'Inyectar instrucciones'),
-          h('button', { onclick: () => this.handlers.onRefresh() }, 'Actualizar'),
-          h('button', { title: 'Vuelve a leer la última respuesta de la IA (si la pestaña iba lenta y no la tomó)', onclick: () => this.handlers.onRescan?.() }, 'Reescanear')),
+          h('button', { class: 'primary', onclick: () => this.handlers.onInject() }, 'Inject instructions'),
+          h('button', { onclick: () => this.handlers.onRefresh() }, 'Refresh'),
+          h('button', { title: 'Re-reads the last AI response (if the tab was slow and missed it)', onclick: () => this.handlers.onRescan?.() }, 'Rescan')),
 
         this.logs.length
           ? h('ul', { class: 'log' }, this.logs.map((l) => h('li', { class: l.kind },
-            `${l.ts.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · ${l.text}`)))
+            `${l.ts.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · ${l.text}`)))
           : null,
 
-        h('div', { class: 'foot' }, h('div', {}, `Web MCP Bridge v${WMB.VERSION}`), h('div', {}, 'Github: @AstraxOf')));
+        h('div', { class: 'foot' }, h('div', {}, `Web MCP Bridge (Fork) v${WMB.VERSION}`), h('div', {}, 'GitHub: @ranggaas6/web-mcp-bridge')));
     }
 
-    /** v1.7.2 · La aprobación va SIEMPRE arriba (bajo el encabezado) para que sus botones nunca queden fuera del panel.
-     *  Se muestra una tarjeta a la vez; las demás esperan en cola. */
+    /** Approval always at the top (below header) so its buttons never fall out of the panel. */
     #approvalSection() {
       if (!this.approvals.length) return null;
       const rest = this.approvals.length - 1;
       return h('div', { class: 'approvals' },
         this.#approvalCard(this.approvals[0]),
-        rest > 0 ? h('p', { class: 'muted queue' }, `+${rest} más en cola`) : null);
+        rest > 0 ? h('p', { class: 'muted queue' }, `+${rest} more in queue`) : null);
     }
 
     #approvalCard(item) {
@@ -396,13 +377,13 @@
       let args = JSON.stringify(call.arguments ?? {}, null, 2);
       if (args.length > 1500) args = `${args.slice(0, 1500)}\n…`;
       return h('div', { class: 'card' },
-        h('strong', {}, 'La IA quiere ejecutar una herramienta'),
+        h('strong', {}, 'The AI wants to run a tool'),
         h('div', {}, `${call.server} › ${call.name}`),
         h('pre', {}, args),
         h('div', { class: 'row' },
-          h('button', { class: 'primary', onclick: () => decide(true) }, 'Ejecutar'),
-          h('button', { onclick: () => decide('always') }, 'Permitir siempre'),
-          h('button', { class: 'danger', onclick: () => decide(false) }, 'Rechazar')));
+          h('button', { class: 'primary', onclick: () => decide(true) }, 'Run'),
+          h('button', { onclick: () => decide('always') }, 'Always allow'),
+          h('button', { class: 'danger', onclick: () => decide(false) }, 'Reject')));
     }
   }
 
