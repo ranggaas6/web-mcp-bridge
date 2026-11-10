@@ -1,14 +1,14 @@
-﻿FROM python:3.11-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instalar dependencias del servidor
+# Install server dependencies
 COPY server/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar los archivos del servidor
+# Copy the server files
 COPY server/ ./server/
 
-# Glama necesita que el contenedor se comporte como un servidor MCP (stdio).
-# Ejecutamos el servidor demo que viene incluido y habla el protocolo MCP por consola.
+# Glama needs the container to behave as an MCP server (stdio).
+# We run the bundled demo server, which speaks the MCP protocol over stdio.
 CMD ["python", "server/examples/demo_mcp_server.py"]
