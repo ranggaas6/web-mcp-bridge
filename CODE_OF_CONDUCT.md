@@ -1,7 +1,5 @@
 # Contributor Covenant Code of Conduct
 
-> [Leer en español](#código-de-conducta-del-pacto-del-contribuyente)
-
 ## Our Pledge
 
 We as members, contributors, and leaders pledge to make participation in our community a harassment-free experience for everyone, regardless of age, body size, visible or invisible disability, ethnicity, sex characteristics, gender identity and expression, level of experience, education, socio-economic status, nationality, personal appearance, race, caste, color, religion, or sexual identity and orientation.
@@ -34,7 +32,7 @@ Community leaders have the right and responsibility to remove, edit, or reject c
 
 ## Scope
 
-This Code of Conduct applies within all community spaces, and also applies when an individual is officially representing the community in public spaces. Community spaces include this repository (issues, pull requests, discussions) and the official [Telegram channel](https://t.me/AstraxMCP). Examples of representing our community include using an official email address, posting via an official social media account, or acting as an appointed representative at an online or offline event.
+This Code of Conduct applies within all community spaces, and also applies when an individual is officially representing the community in public spaces. Community spaces include this repository (issues, pull requests, discussions). Examples of representing our community include using an official email address, posting via an official social media account, or acting as an appointed representative at an online or offline event.
 
 ## Enforcement
 
@@ -83,91 +81,3 @@ For answers to common questions about this code of conduct, see the FAQ at [http
 [Mozilla CoC]: https://github.com/mozilla/diversity
 [FAQ]: https://www.contributor-covenant.org/faq
 [translations]: https://www.contributor-covenant.org/translations
-
----
-
-# Código de Conducta del Pacto del Contribuyente
-
-> [Read in English](#contributor-covenant-code-of-conduct)
-
-## Nuestro compromiso
-
-Como miembros, colaboradores y líderes, nos comprometemos a que la participación en nuestra comunidad sea una experiencia libre de acoso para todas las personas, sin importar su edad, tamaño corporal, discapacidad visible o invisible, etnia, características sexuales, identidad y expresión de género, nivel de experiencia, educación, nivel socioeconómico, nacionalidad, apariencia personal, raza, casta, color, religión o identidad y orientación sexual.
-
-Nos comprometemos a actuar e interactuar de maneras que contribuyan a una comunidad abierta, acogedora, diversa, inclusiva y saludable.
-
-## Nuestros estándares
-
-Ejemplos de comportamiento que contribuyen a un ambiente positivo:
-
-* Demostrar empatía y amabilidad hacia otras personas
-* Respetar las opiniones, puntos de vista y experiencias diferentes
-* Dar y aceptar con elegancia comentarios constructivos
-* Asumir la responsabilidad, disculparse con quienes se vean afectados por nuestros errores y aprender de la experiencia
-* Centrarse en lo que es mejor no solo para cada individuo, sino para toda la comunidad
-
-Ejemplos de comportamiento inaceptable:
-
-* El uso de lenguaje o imágenes sexualizadas, y la atención o los avances sexuales de cualquier tipo
-* Trolling, comentarios insultantes o despectivos, y ataques personales o políticos
-* El acoso público o privado
-* Publicar información privada de otras personas, como una dirección física o de correo electrónico, sin su permiso explícito
-* Otras conductas que razonablemente puedan considerarse inapropiadas en un entorno profesional
-
-## Responsabilidades de aplicación
-
-Los líderes de la comunidad son responsables de aclarar y hacer cumplir nuestros estándares de comportamiento aceptable y tomarán medidas correctivas apropiadas y justas ante cualquier conducta que consideren inapropiada, amenazante, ofensiva o dañina.
-
-Los líderes tienen el derecho y la responsabilidad de eliminar, editar o rechazar comentarios, commits, código, ediciones de wiki, issues y otras contribuciones que no se ajusten a este Código de Conducta, y comunicarán los motivos de sus decisiones de moderación cuando corresponda.
-
-## Alcance
-
-Este Código de Conducta se aplica en todos los espacios de la comunidad, y también cuando una persona representa oficialmente a la comunidad en espacios públicos. Los espacios de la comunidad incluyen este repositorio (issues, pull requests, discusiones) y el [canal oficial de Telegram](https://t.me/AstraxMCP). Ejemplos de representación: usar una dirección de correo oficial, publicar desde una cuenta oficial de redes sociales o actuar como representante designado en un evento en línea o presencial.
-
-## Aplicación
-
-Los casos de comportamiento abusivo, acosador o inaceptable pueden reportarse a los líderes responsables en **[avpn497@gmail.com](mailto:avpn497@gmail.com)**. Todas las quejas serán revisadas e investigadas de forma rápida y justa.
-
-Todos los líderes están obligados a respetar la privacidad y la seguridad de quien reporte un incidente.
-
-## Directrices de aplicación
-
-Los líderes seguirán estas Directrices de Impacto en la Comunidad para determinar las consecuencias de cualquier acción que consideren una infracción de este Código de Conducta:
-
-### 1. Corrección
-
-**Impacto en la comunidad**: Uso de lenguaje inapropiado u otro comportamiento considerado poco profesional o no bienvenido.
-
-**Consecuencia**: Una advertencia privada y por escrito de los líderes, que aclare la naturaleza de la infracción y explique por qué el comportamiento fue inapropiado. Se puede solicitar una disculpa pública.
-
-### 2. Advertencia
-
-**Impacto en la comunidad**: Una infracción por un incidente o una serie de acciones.
-
-**Consecuencia**: Una advertencia con consecuencias si el comportamiento continúa. Sin interacción con las personas involucradas, incluida la interacción no solicitada con quienes aplican el Código de Conducta, durante un período determinado. Esto incluye evitar interacciones en los espacios de la comunidad y en canales externos como las redes sociales. Incumplir estos términos puede llevar a una expulsión temporal o permanente.
-
-### 3. Expulsión temporal
-
-**Impacto en la comunidad**: Una infracción grave de los estándares de la comunidad, incluido el comportamiento inapropiado sostenido.
-
-**Consecuencia**: Una expulsión temporal de cualquier tipo de interacción o comunicación pública con la comunidad durante un período determinado. Durante ese tiempo no se permite ninguna interacción, pública o privada, con las personas involucradas, incluida la interacción no solicitada con quienes aplican el Código de Conducta. Incumplir estos términos puede llevar a una expulsión permanente.
-
-### 4. Expulsión permanente
-
-**Impacto en la comunidad**: Demostrar un patrón de infracciones de los estándares de la comunidad, incluido el comportamiento inapropiado sostenido, el acoso a una persona o la agresión o el menosprecio hacia grupos de personas.
-
-**Consecuencia**: Una expulsión permanente de cualquier tipo de interacción pública dentro de la comunidad.
-
-## Atribución
-
-Este Código de Conducta está adaptado del [Contributor Covenant][inicio], versión 2.1, disponible en [https://www.contributor-covenant.org/es/version/2/1/code_of_conduct.html][v2.1-es].
-
-Las Directrices de Impacto en la Comunidad se inspiraron en la [escalera de aplicación del código de conducta de Mozilla][Mozilla-es].
-
-Para respuestas a preguntas frecuentes, consulta [https://www.contributor-covenant.org/faq][faq-es]. Hay traducciones disponibles en [https://www.contributor-covenant.org/translations][trad].
-
-[inicio]: https://www.contributor-covenant.org
-[v2.1-es]: https://www.contributor-covenant.org/es/version/2/1/code_of_conduct.html
-[Mozilla-es]: https://github.com/mozilla/diversity
-[faq-es]: https://www.contributor-covenant.org/faq
-[trad]: https://www.contributor-covenant.org/translations
