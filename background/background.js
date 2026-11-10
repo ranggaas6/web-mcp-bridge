@@ -11,6 +11,7 @@ import {
   STORAGE_KEYS as KEYS, LEGACY_STORAGE_KEYS, DEFAULT_SETTINGS, MAX_ACTIVE_SERVERS,
   CALL_TIMEOUT_MS, HISTORY_LIMIT, SUPPORTED_URL_PATTERNS, PERMISSIONS, RESPONSE_DELAY_MAX_MS,
   NOTICES_URL, NOTICES_EVERY_MS, NOTICES_RETRY_MS, NOTICES_MAX_BYTES,
+  DEFAULT_CONTROL_PORT, DEFAULT_LAUNCHER_PORT,
 } from '../shared/constants.js';
 import { compareVersions, normalizeFeed, publicNotices, mergeFeed, safeLink } from './notices.js';
 
@@ -65,7 +66,7 @@ function assignSlugs(servers) {
 // ───────────────────────── Conexiones ─────────────────────────
 
 // ------------- Deteccion automatica desde servers.json (v1.3.0) -------------
-// El puente (mcp_ws_bridge.py --config servers.json) publica su lista en http://127.0.0.1:8099/servers.
+// El puente (mcp_ws_bridge.py --config servers.json) publica su lista en http://127.0.0.1:8199/servers.
 // Los servidores nuevos aparecen solos en la extension; los que se quiten de servers.json desaparecen.
 
 let lastDiscovery = 0;
@@ -90,7 +91,7 @@ async function bridgeFetch(path, { method = 'GET', timeout = 1500, body: payload
   try {
     // text/plain: es una petición «simple» (sin preflight CORS); el puente lo interpreta como JSON.
     const extra = payload === undefined ? {} : { body: payload, headers: { 'Content-Type': 'text/plain; charset=utf-8' } };
-    const res = await fetch(`http://127.0.0.1:${settings.controlPort || 8099}${path}`, { method, cache: 'no-store', signal: ctl.signal, ...extra });
+    const res = await fetch(`http://127.0.0.1:${settings.controlPort || DEFAULT_CONTROL_PORT}${path}`, { method, cache: 'no-store', signal: ctl.signal, ...extra });
     let body = null;
     try { body = await res.json(); } catch { /* respuesta sin cuerpo */ }
     return { status: res.status, body };
@@ -434,14 +435,14 @@ function publicBridge() {
 const OLD_BRIDGE = 'Tu puente es de una version anterior y todavia no sabe hacerlo. Ciérralo y ábrelo UNA vez con server/restart_bridge.cmd; después este botón funcionará.';
 
 // ------------- Lanzador (v1.6.0): encender / apagar / reiniciar el puente desde el panel -------------
-// Una extension no puede lanzar procesos; lo hace server/start_bridge_loop.pyw (puerto 8098), que se instala una vez.
+// Una extension no puede lanzar procesos; lo hace server/start_bridge_loop.pyw (puerto 8198 en el fork), que se instala una vez.
 
 async function launcherFetch(path, { method = 'GET', timeout = 1500 } = {}) {
   const { settings } = await loadState();
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeout);
   try {
-    const res = await fetch(`http://127.0.0.1:${settings.launcherPort || 8098}${path}`, { method, cache: 'no-store', signal: ctl.signal });
+    const res = await fetch(`http://127.0.0.1:${settings.launcherPort || DEFAULT_LAUNCHER_PORT}${path}`, { method, cache: 'no-store', signal: ctl.signal });
     let body = null;
     try { body = await res.json(); } catch { /* respuesta sin cuerpo */ }
     return { status: res.status, body };
@@ -459,7 +460,7 @@ async function probeLauncher() {
   }
 }
 
-const NO_LAUNCHER = 'Falta el lanzador: haz doble clic en server/install.cmd (una sola vez) y podr\u00e1s encender, apagar y reiniciar el puente desde aqu\u00ed.';
+const NO_LAUNCHER = 'Falta el lanzador: haz doble clic en server/install.cmd (una sola vez) y podrás encender, apagar y reiniciar el puente desde aquí.';
 
 /** action: 'start' | 'stop' | 'restart'. Pide la orden al lanzador y espera a ver el resultado real en el puente. */
 async function controlBridge(action) {
@@ -468,7 +469,7 @@ async function controlBridge(action) {
   const oldPid = before.online ? before.pid : null;
   try {
     const { status, body } = await launcherFetch(`/${action}`, { method: 'POST', timeout: 5000 });
-    if (status !== 200 || !body?.ok) return { ok: false, error: body?.error ?? 'El lanzador no acept\u00f3 la orden.' };
+    if (status !== 200 || !body?.ok) return { ok: false, error: body?.error ?? 'El lanzador no aceptó la orden.' };
   } catch {
     return { ok: false, error: 'No se pudo contactar con el lanzador.' };
   }
@@ -488,7 +489,7 @@ async function controlBridge(action) {
   }
   return {
     ok: false,
-    error: wantOnline ? 'El puente no volvi\u00f3 a encenderse en 30 segundos. Revisa server/bridge.log.' : 'El puente no se apag\u00f3 en 15 segundos.',
+    error: wantOnline ? 'El puente no volvió a encenderse en 30 segundos. Revisa server/bridge.log.' : 'El puente no se apagó en 15 segundos.',
   };
 }
 async function restartBridge() {
@@ -788,7 +789,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     if (details?.reason === 'install') chrome.tabs.create({ url: chrome.runtime.getURL('welcome/welcome.html') }).catch(() => {});
     checkNotices().catch(() => {});
   } catch (err) {
-    // Al recargar la extensión Chrome puede cerrar el service worker a mitad (error «No SW»): es inofensivo, el arranque normal lo repite.
+    // Al recargar la extension Chrome puede cerrar el service worker a mitad (error «No SW»): es inofensivo, el arranque normal lo repite.
     console.warn('[WMB] onInstalled interrumpido:', err?.message ?? err);
   }
 });
