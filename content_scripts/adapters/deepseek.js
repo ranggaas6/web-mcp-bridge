@@ -1,45 +1,41 @@
 /**
- * deepseek.js — Adaptador para DeepSeek (chat.deepseek.com).
+ * deepseek.js — Adapter for DeepSeek (chat.deepseek.com).
  *
- * Particularidades de la interfaz de DeepSeek:
- *   - El cuadro de texto es un <textarea id="chat-input"> normal (React): `dom.setText` ya lo maneja.
- *   - El botón de enviar NO tiene aria-label ni clase estable: es un icono (`ds-icon-button`) al final de la barra.
- *     Mientras se genera, ESE MISMO botón pasa a ser «detener»: por eso aquí se envía con Enter y el botón solo se
- *     pulsa si se sabe que no se está generando (si no, un clic CANCELARÍA la respuesta).
- *   - Las respuestas se renderizan en `.ds-markdown`. Con «DeepThink» el razonamiento también usa Markdown y a veces
- *     contiene un borrador de la llamada `mcp_call`: se excluye para no ejecutarla dos veces.
- *   - No hay un ID estable por mensaje.
+ * DeepSeek UI particulars:
+ *   - The text box is a plain <textarea id="chat-input"> (React): `dom.setText` already handles it.
+ *   - The send button has NO aria-label or stable class: it is an icon (`ds-icon-button`) at the end of the bar.
+ *     While generating, THAT SAME button becomes "stop": so here it is sent with Enter, and the button is only
+ *     clicked if we know generation is not running (otherwise a click would CANCEL the response).
+ *   - Responses render in `.ds-markdown`. With "DeepThink" the reasoning also uses Markdown and sometimes
+ *     contains a draft of the `mcp_call`: it is excluded so it does not run twice.
+ *   - There is no stable per-message ID.
  *
- * Anti-bucle (el mismo resultado se enviaba una y otra vez):
- *   1. ID de llamada por CONTENIDO (conversación + cuántos mensajes anteriores traen la misma llamada), no por la
- *      posición del mensaje: si DeepSeek repinta o cambia el nº de bloques `.ds-markdown`, la llamada no se «renueva».
- *   2. Cerrojo: tras ejecutar una llamada, otra IDÉNTICA se ignora hasta que el resultado se envíe y la IA vuelva
- *      a responder.
- *   3. Envío seguro: no se pulsa «enviar» si hay una generación en curso, ni si el cuadro ya está vacío (ya salió).
- *
- * Si DeepSeek cambia su interfaz, normalmente solo hay que añadir un selector a la lista correspondiente.
+ * Anti-loop (the same result was sent over and over):
+ *   1. Call ID by CONTENT (conversation + how many earlier messages carry the same call), not by message
+ *      position: if DeepSeek repaints or changes the number of `.ds-markdown` blocks, the call is not "renewed".
+ *   2. Lock: after running a call, another IDENTICAL one is ignored until the result is sent and the AI replies again.
+ *   3. Safe send: "send" is not clicked if a generation is in progress, nor if the box is already empty (it went out).
  */
 (() => {
   'use strict';
   const WMB = globalThis.WMB;
 
-  /** Bloques de «razonamiento» (DeepThink): su texto no cuenta como respuesta. */
+  /** "Reasoning" blocks (DeepThink): their text does not count as the answer. */
   const THINK_SEL = '.ds-think-content, [class*="think" i], [class*="reasoning" i]';
-  /** Cabecera corta que precede al razonamiento («Thought for 5 seconds», «Pensó durante 5 segundos»…). */
-  const THINK_HEADER = /^(thought|thinking|deepthink|pens[óo]|pensando|razon|reasoning)/i;
-  /** Botones de icono (enviar, adjuntar, detener) y, como alternativa, cualquier botón ARIA. */
+  /** Short header that precedes the reasoning ("Thought for 5 seconds", …). */
+  const THINK_HEADER = /^(thought|thinking|deepthink|razon|reasoning)/i;
+  /** Icon buttons (send, attach, stop) and, as an alternative, any ARIA button. */
   const ICON_BUTTONS = ['div[role="button"].ds-icon-button', 'button.ds-icon-button', '.ds-icon-button'];
   const ANY_BUTTONS = ['div[role="button"]', 'button'];
 
-  const GROW_MS = 2000;          // el último mensaje creció hace menos de esto → se está generando
-  const FRESH_CHAT_MS = 120_000; // un chat nuevo recibe su URL poco después del primer envío
-  const LOCK_SENT_MS = 90_000;   // cerrojo: tras enviar el resultado, máximo este tiempo
-  const LOCK_MAX_MS = 240_000;   // …y si el resultado nunca se envía, máximo este otro
+  const GROW_MS = 2000;
+  const FRESH_CHAT_MS = 120_000;
+  const LOCK_SENT_MS = 90_000;
+  const LOCK_MAX_MS = 240_000;
 
   const convId = () => (location.pathname.match(/\/s\/([^/?#]+)/) || [])[1] || null;
   const hashOf = (call) => WMB.hash(JSON.stringify(call) ?? '');
 
-  /** ¿Es un bloque de razonamiento (no la respuesta)? */
   function isThinking(el) {
     if (el.closest(THINK_SEL) || el.querySelector(THINK_SEL)) return true;
     for (let node = el, depth = 0; node && depth < 3; node = node.parentElement, depth += 1) {
@@ -50,11 +46,11 @@
   }
 
   class DeepSeekAdapter extends WMB.BaseAdapter {
-    #conv = convId();                            // conversación actual (null = chat nuevo sin URL)
-    #tag = this.#conv ?? `h${Date.now()}`;       // etiqueta de conversación para los IDs
-    #hashCache = new WeakMap();                  // elemento → {text, set} (hashes de sus llamadas)
-    #lock = null;                                // { hash, firedAt, sentAt, newGen }
-    #grow = { el: null, len: 0, at: 0 };         // seguimiento del crecimiento del último mensaje
+    #conv = convId();
+    #tag = this.#conv ?? `h${Date.now()}`;
+    #hashCache = new WeakMap();
+    #lock = null;
+    #grow = { el: null, len: 0, at: 0 };
 
     constructor() {
       super({
@@ -65,25 +61,17 @@
             'textarea#chat-input',
             'textarea[placeholder*="DeepSeek" i]',
             'textarea[placeholder*="Message" i]',
-            'textarea[placeholder*="Mensaje" i]',
             'div[role="textbox"][contenteditable="true"]',
             'textarea',
           ],
           sendButton: [
-            // Candidatos con etiqueta explícita; la búsqueda real la hace getSendButton().
             'div[role="button"][aria-label*="Send" i]',
             'button[aria-label*="Send" i]',
-            'div[role="button"][aria-label*="Enviar" i]',
-            'button[aria-label*="Enviar" i]',
           ],
           assistantMessages: ['.ds-markdown'],
           stopButton: [
             'div[role="button"][aria-label*="Stop" i]',
             'button[aria-label*="Stop" i]',
-            'div[role="button"][aria-label*="Detener" i]',
-            'button[aria-label*="Detener" i]',
-            'div[role="button"][aria-label*="Parar" i]',
-            'button[aria-label*="Parar" i]',
           ],
           fileInput: ['input[type="file"]'],
         },
@@ -94,9 +82,8 @@
       return hostname === 'deepseek.com' || hostname.endsWith('.deepseek.com');
     }
 
-    // ───────────── Conversación ─────────────
+    // ───────────── Conversation ─────────────
 
-    /** Etiqueta estable de la conversación. Un chat nuevo que recibe su URL (/ → /a/chat/s/<id>) conserva su etiqueta. */
     #syncConversation() {
       const id = convId();
       if (id === this.#conv) return;
@@ -105,19 +92,17 @@
       if (!freshChatGotUrl) this.#tag = id ?? `h${Date.now()}`;
     }
 
-    // ───────────── Mensajes del asistente (sin el razonamiento) ─────────────
+    // ───────────── Assistant messages (without reasoning) ─────────────
 
     getAssistantMessages() {
       this.#syncConversation();
       const found = super.getAssistantMessages();
       const answers = found.filter((el) => !isThinking(el));
-      // Si el filtro lo quitara todo, es mejor no filtrar que quedarse ciego.
       const list = answers.length || !found.length ? answers : found;
-      // Sin contenedores anidados (evita duplicados con selectores amplios).
       return list.filter((el) => !list.some((other) => other !== el && el.contains(other)));
     }
 
-    /** Hashes de las llamadas MCP de un mensaje (con caché por texto). */
+    /** Hashes of the message's MCP calls (cached by text). */
     #callHashes(el) {
       const text = el.textContent || '';
       const hit = this.#hashCache.get(el);
@@ -128,8 +113,8 @@
     }
 
     /**
-     * Clave por CONTENIDO: conversación + nº de mensajes anteriores que traen la misma llamada.
-     * No depende de la posición del mensaje, así que repintados de la página no «renuevan» una llamada ya ejecutada.
+     * Key by CONTENT: conversation + number of earlier messages that carry the same call.
+     * It does not depend on message position, so page repaints do not "renew" an executed call.
      */
     getMessageKey(element, index) {
       const mine = this.#callHashes(element);
@@ -143,12 +128,8 @@
       return `${this.#tag}|${before}`;
     }
 
-    // ───────────── Generación en curso ─────────────
+    // ───────────── Generation in progress ─────────────
 
-    /**
-     * ¿La IA está generando? Botón «detener» (si tiene etiqueta) o el último mensaje creció hace instantes.
-     * No se mira el icono del botón: si falla, haría pasar una conversación antigua por «en vivo».
-     */
     isStreaming() {
       let streaming = WMB.exists(this.selectors.stopButton);
       if (!streaming) {
@@ -156,16 +137,16 @@
         const last = messages[messages.length - 1] ?? null;
         const len = last ? (last.textContent || '').length : 0;
         const now = Date.now();
-        if (last && last === this.#grow.el && len > this.#grow.len) this.#grow.at = now; // creció el MISMO mensaje
+        if (last && last === this.#grow.el && len > this.#grow.len) this.#grow.at = now;
         this.#grow.el = last;
         this.#grow.len = len;
         streaming = now - this.#grow.at < GROW_MS;
       }
-      if (streaming && this.#lock?.sentAt) this.#lock.newGen = true; // la IA volvió a responder tras enviar el resultado
+      if (streaming && this.#lock?.sentAt) this.#lock.newGen = true;
       return streaming;
     }
 
-    // ───────────── Cerrojo anti-duplicado ─────────────
+    // ───────────── Anti-duplicate lock ─────────────
 
     #locked(hash) {
       const lock = this.#lock;
@@ -178,9 +159,9 @@
 
     observeResponses(callback, options) {
       return super.observeResponses((detected) => {
-        if (detected.malformed || !detected.call) { callback(detected); return; } // aviso de bloque ilegible: no tiene llamada que bloquear
+        if (detected.malformed || !detected.call) { callback(detected); return; }
         const hash = hashOf(detected.call);
-        if (this.#locked(hash) && detected.id === this.#lock?.id) { this.debug?.('ok', 'DeepSeek · llamada idéntica ya en curso: ignorada'); return; }
+        if (this.#locked(hash) && detected.id === this.#lock?.id) { this.debug?.('ok', 'DeepSeek · identical call already in progress: ignored'); return; }
         this.#lock = { hash, id: detected.id, firedAt: Date.now(), sentAt: 0, newGen: false };
         callback(detected);
       }, options);
@@ -194,9 +175,9 @@
       }
     }
 
-    // ───────────── Enviar ─────────────
+    // ───────────── Send ─────────────
 
-    /** Botón de icono (sin texto) más a la derecha de la barra del cuadro de texto. */
+    /** Icon button (no text) furthest right in the composer bar. */
     #composerButtons() {
       const composer = this.getComposer();
       if (!composer) return [];
@@ -223,10 +204,6 @@
       return buttons.length ? buttons[buttons.length - 1] : null;
     }
 
-    /**
-     * Envía con Enter (durante una generación no hace nada, así que es seguro) y solo si no sale pulsa el botón,
-     * que durante una generación es «detener». Si el cuadro ya está vacío no hace nada (ya se envió).
-     */
     async submit(timeout = 4000) {
       const composer = this.getComposer();
       if (!composer) return false;
@@ -237,9 +214,6 @@
         const idle = await WMB.waitFor(() => !this.isStreaming(), { timeout, interval: 200 });
         if (!idle) return false;
       }
-      // v1.7.0: solo cuenta como enviado si el texto SALIÓ del cuadro. Antes bastaba «está generando», pero eso puede ser
-      // la respuesta anterior aún en pantalla: se daba por enviado, el texto seguía dentro y el siguiente resultado se
-      // pegaba detrás (la respuesta vieja volvía al input y se adjuntaba otra vez).
       const gone = () => !hasText();
 
       composer.focus();
