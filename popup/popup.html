@@ -23,12 +23,12 @@
   <nav class="tabs" role="tablist" aria-label="Sections">
     <i class="tab-ink" aria-hidden="true"></i>
     <button role="tab" data-tab="servers" aria-selected="true">Servers</button>
+    <button role="tab" data-tab="notices" aria-selected="false">Notices<b id="notices-badge" class="count" hidden></b></button>
     <button role="tab" data-tab="history" aria-selected="false">History</button>
     <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
   </nav>
 
   <main id="main">
-    <!-- Servers -->
     <section id="tab-servers">
       <div class="card bridge-card">
         <div class="bridge-head">
@@ -75,7 +75,21 @@
       </div>
     </section>
 
-    <!-- History -->
+    <section id="tab-notices" hidden>
+      <div class="summary">
+        <strong>Author notices</strong>
+        <button id="read-all" class="link" type="button">Mark all as read</button>
+      </div>
+      <ul id="notice-list" class="notice-list"></ul>
+      <div id="notices-empty" class="empty" hidden>
+        <p>No notices right now. If a new version comes out or something important happens, you'll see it here and in a notification.</p>
+      </div>
+      <div class="foot-row">
+        <small id="notices-line" class="muted"></small>
+        <button type="button" id="check-notices" class="soft small"><i class="ico" data-ico="refresh"></i><span>Check for notices</span></button>
+      </div>
+    </section>
+
     <section id="tab-history" hidden>
       <div class="summary">
         <strong>Recent calls</strong>
@@ -85,8 +99,17 @@
       <p id="history-empty" class="empty" hidden>No tool has been executed yet.</p>
     </section>
 
-    <!-- Settings -->
     <section id="tab-settings" hidden>
+      <div class="card group">
+        <label class="setting">
+          <span class="switch"><input type="checkbox" id="set-showNotices"><span></span></span>
+          <span class="txt">
+            <strong>Show author notices</strong>
+            <small>What's new, new versions, or incidents. Informational only: nothing is downloaded or installed.</small>
+          </span>
+        </label>
+      </div>
+
       <div class="card group">
         <label class="setting">
           <span class="switch"><input type="checkbox" id="set-autoDiscover"><span></span></span>
@@ -156,7 +179,6 @@
           <input type="number" id="set-responseDelaySec" min="0" max="60" step="0.5">
         </label>
       </div>
-
     </section>
   </main>
 
