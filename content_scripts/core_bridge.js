@@ -1,17 +1,8 @@
 /**
  * core_bridge.js — Controlador principal en cada pestaña de chat.
  *
- * Flujo:
- *   1. Detecta la plataforma (adaptador) y consulta al background los MCP activos.
- *   2. Muestra el widget flotante para inyectar las instrucciones y elegir el permiso de cada MCP.
- *   3. Observa las respuestas de la IA; al detectar un `mcp_call` nuevo:
- *        permiso del MCP (allow / ask / deny) → ejecutar vía background → entregar el resultado COMPLETO al chat
- *        (texto en línea; imágenes, audio y textos largos como archivos adjuntos) → comprobar que el chat lo aceptó.
- *   4. Mantiene a la IA al tanto: una línea de recordatorio en cada mensaje y reenvío periódico de las instrucciones.
- *
- * Robustez con la pestaña en segundo plano: ningún paso depende de setTimeout/setInterval de la página
- * (se usa WMB.sleep, que cuenta el service worker), hay un latido que refresca el estado y un vigilante que
- * impide que una llamada atascada bloquee la cola.
+ * Fork: namespace `wmbx` en sessionStorage, marca de inyección y Web Lock
+ * para convivir con la extensión original en la misma pestaña.
  */
 (() => {
   'use strict';
@@ -21,12 +12,11 @@
   if (!adapter) return;
   WMB.started = true;
 
-  const INJECT_KEY = 'wmb:injected-signature';
-  const TURNS_KEY = 'wmb:turns-since-full';
+  const INJECT_KEY = 'wmbx:injected-signature';
+  const TURNS_KEY = 'wmbx:turns-since-full';
   const HEARTBEAT_MS = 10_000;
   const TOOL_TIMEOUT_MS = 150_000;
   const DELIVER_TIMEOUT_MS = 120_000;
-  // La IA dice que no tiene acceso a nada local: señal de que perdió el contexto de las instrucciones.
   const DENIAL = /no tengo acceso|no puedo acceder|no tengo (la )?capacidad de (acceder|ejecutar|controlar)|no puedo (ejecutar|controlar|ver tu|abrir)|no dispongo de (acceso|herramientas)|no tengo herramientas|i (don'?t|do not) have (access|tools)|i (can'?t|cannot|am unable to) (access|control|run|execute|see your)/i;
 
   const slugKey = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -36,10 +26,8 @@
   let queue = Promise.resolve();
   let lastRefreshError = '';
 
-  // Best-effort: un Web Lock abierto reduce que el navegador «congele» la pestaña en segundo plano.
-  try { navigator.locks?.request('wmb-alive', () => new Promise(() => {})).catch(() => {}); } catch { /* noop */ }
+  try { navigator.locks?.request('wmbx-alive', () => new Promise(() => {})).catch(() => {}); } catch { /* noop */ }
 
-  /** Mensajería segura: si la extensión se recarga, el contexto queda invalidado. */
   async function send(message) {
     try {
       return await chrome.runtime.sendMessage(message);
@@ -55,7 +43,6 @@
       await send({ type: 'UPDATE_SETTINGS', settings: { bridgeEnabled: value } });
       await refresh();
     },
-    /** v1.7.0 · Botón GLOBAL: 'start' | 'stop' | 'restart' actúan sobre el PROCESO del puente (no solo sobre el interruptor). */
     onBridgeAction: async (action) => {
       const labels = { start: 'Encendiendo', stop: 'Apagando', restart: 'Reiniciando' };
       widget.update({ bridgeBusy: action });
@@ -66,25 +53,21 @@
       else widget.log('err', res?.error ?? 'No se pudo completar la acción.');
       await refresh();
     },
-    /** v1.7.0 · Tiempo de respuesta configurable (ms) antes de entregar cada resultado a la IA. */
     onSetDelay: async (ms) => {
       await send({ type: 'UPDATE_SETTINGS', settings: { responseDelayMs: ms } });
       await refresh();
     },
-    /** v1.7.0 · Vuelve a analizar el último mensaje de la IA (pestaña lenta que no tomó la respuesta). */
     onRescan: () => { adapter.forceRescan(); widget.log('ok', 'Reescaneando la última respuesta de la IA…'); },
-    /** `id` = un MCP; `null` = todos los MCP a la vez. */
     onSetPermission: async (id, permission) => {
       await send(id ? { type: 'SET_PERMISSION', id, permission } : { type: 'SET_ALL_PERMISSIONS', permission });
       await refresh();
     },
   });
 
-  // Los adaptadores pueden escribir mensajes de depuración en el panel flotante (p. ej. ChatGPT).
   adapter.debug = (kind, message) => widget.log(kind, message);
 
   function injectionStatus() {
-    if (document.body.textContent.includes(`[WMB:${WMB.toolsSignature(state.tools)}]`)) return 'ok';
+    if (document.body.textContent.includes(`[WMBX:${WMB.toolsSignature(state.tools)}]`)) return 'ok';
     return sessionStorage.getItem(INJECT_KEY) ? 'stale' : 'none';
   }
 
@@ -92,7 +75,7 @@
     const [snapshot, active] = await Promise.all([send({ type: 'GET_STATE' }), send({ type: 'GET_ACTIVE_TOOLS' })]);
     if (!snapshot?.ok || !active?.ok) {
       const error = snapshot?.error || active?.error || 'No se pudo contactar con la extensión.';
-      if (error !== lastRefreshError) widget.log('err', error); // el latido no repite el mismo error
+      if (error !== lastRefreshError) widget.log('err', error);
       lastRefreshError = error;
       return;
     }
@@ -100,7 +83,7 @@
     state.settings = snapshot.settings;
     state.servers = snapshot.servers.filter((s) => s.enabled && s.url);
     state.tools = active.tools;
-    WMB.tools = state.tools; // el parser tolerante usa los schemas
+    WMB.tools = state.tools;
     adapter.configure({ focusFallback: state.settings.focusFallback !== false });
     widget.update({
       adapterName: adapter.name,
@@ -138,13 +121,6 @@
     }
   }
 
-  /**
-   * Entrega el resultado al chat SIN omitir nada: el texto va en línea y las imágenes/audio/blobs
-   * (y los textos muy largos) como archivos adjuntos. Si el chat no admite el adjunto, se descarga.
-   * Termina con una línea de recordatorio para que la IA no olvide sus herramientas y siga con la tarea.
-   */
-  // v1.7.0 · Ritmo de respuesta configurable (panel flotante): con preguntas cortas el puente contestaba tan rápido que
-  // saturaba a la IA («Too many requests»). Espera `responseDelayMs` y garantiza una separación mínima entre entregas.
   const MIN_GAP_MS = 1200;
   let lastDeliveredAt = 0;
   async function paceDelivery() {
@@ -180,7 +156,6 @@
     return { ok: sent.ok, message };
   }
 
-  /** Busca el MCP y la herramienta de una llamada; si el estado local pudiera estar viejo, lo refresca una vez. */
   async function resolveCall(call) {
     const find = () => {
       const wanted = slugKey(call.server);
@@ -197,26 +172,20 @@
     return found;
   }
 
-  // ------------- Llamadas repetidas: la IA vuelve a pedir EXACTAMENTE lo mismo -------------
-  // Nunca se ignoran en silencio: se ejecutan de nuevo (el dato puede haber cambiado) y se avisa a la IA en el resultado.
-  // Si repite la misma llamada demasiadas veces seguidas se le reenvia el ultimo resultado en vez de ejecutarla otra vez.
-  // v1.7.1 · ANTI-COLA: cada llamada detectada recibe un numero; si llega otra (de la IA) o el usuario envia algo, las anteriores\n  // que aun esperan en la cola o se estan ejecutando quedan OBSOLETAS: no se ejecutan y su resultado no se entrega (era el eco).
   let callSeq = 0;
   const REPEAT_WINDOW_MS = 15 * 60 * 1000;
   const MAX_REPEATS = 4;
-  const recentCalls = new Map(); // clave de llamada -> { count, at, result }
+  const recentCalls = new Map();
 
-  /** Procesa una llamada MCP detectada en la respuesta de la IA. */
   async function handleCall(detected) {
     if (detected.malformed) return handleMalformed(detected);
     badStreak = 0;
     const { call } = detected;
-    if (!state.settings.bridgeEnabled) return; // bridge apagado: se ignoran las llamadas
+    if (!state.settings.bridgeEnabled) return;
     const obsolete = () => detected.seq !== undefined && detected.seq !== callSeq;
     if (obsolete()) { widget.log('err', `Llamada obsoleta descartada (${call.name}): ya hay algo mas nuevo en el chat.`); return; }
     const { srv, tool } = await resolveCall(call);
 
-    // Llamada que no corresponde a ningún MCP activo (p. ej. la IA explicando el formato): se ignora.
     if (!srv) {
       widget.log('err', `Llamada ignorada: servidor «${call.server ?? '?'}» no activo.`);
       return;
@@ -226,7 +195,7 @@
     const prev = recentCalls.get(repeatKey);
     const repeats = prev && Date.now() - prev.at < REPEAT_WINDOW_MS ? prev.count : 0;
     if (repeats >= MAX_REPEATS && prev.result && tool && srv.permission !== 'deny') {
-      const cached = { ...prev.result, note: `[WMB] Llamada IDENTICA repetida ${repeats + 1} veces seguidas: no se ejecuto otra vez. Este es el resultado de la ultima ejecucion; usalo. Si no te sirve, cambia los argumentos o pidele otra cosa al usuario.` };
+      const cached = { ...prev.result, note: `[WMBX] Llamada IDENTICA repetida ${repeats + 1} veces seguidas: no se ejecuto otra vez. Este es el resultado de la ultima ejecucion; usalo. Si no te sirve, cambia los argumentos o pidele otra cosa al usuario.` };
       widget.log('err', `Llamada identica repetida ${repeats + 1} veces: reenvio el ultimo resultado sin ejecutar.`);
       prev.count += 1;
       prev.at = Date.now();
@@ -250,7 +219,7 @@
           await send({ type: 'SET_PERMISSION', id: srv.id, permission: 'allow' });
           await refresh();
         }
-      } // 'allow': se ejecuta siempre, sin preguntar nunca
+      }
 
       if (!approved) {
         result = { status: 'rejected', text: 'El usuario rechazó la ejecución de esta herramienta.' };
@@ -270,23 +239,19 @@
     }
     if (tool && srv.permission !== 'deny' && result.status !== 'rejected') {
       recentCalls.set(repeatKey, { count: repeats + 1, at: Date.now(), result });
-      if (repeats > 0) result.note = `[WMB] Esta llamada es identica a la anterior (ya van ${repeats + 1}). Se ejecuto de nuevo y este es el resultado ACTUAL; si ya tienes el dato, no la repitas.`;
+      if (repeats > 0) result.note = `[WMBX] Esta llamada es identica a la anterior (ya van ${repeats + 1}). Se ejecuto de nuevo y este es el resultado ACTUAL; si ya tienes el dato, no la repitas.`;
     }
-    if (detected.rerun) result.note = '[WMB] Reenvío automático: tu mensaje anterior con el resultado no llegó a procesarse. Este es el resultado ACTUAL de tu llamada; continúa desde aquí.';
-    if (detected.extra > 0) result.note = `[WMB] Solo se ejecuto la primera llamada; ${detected.extra} mas se ignoraron. Envia UNA llamada por mensaje y espera el resultado.`;
+    if (detected.rerun) result.note = '[WMBX] Reenvío automático: tu mensaje anterior con el resultado no llegó a procesarse. Este es el resultado ACTUAL de tu llamada; continúa desde aquí.';
+    if (detected.extra > 0) result.note = `[WMBX] Solo se ejecuto la primera llamada; ${detected.extra} mas se ignoraron. Envia UNA llamada por mensaje y espera el resultado.`;
     if (obsolete()) { widget.log('err', `Resultado de ${call.name} descartado: ya hay algo mas nuevo en el chat (no lo envio para no repetir).`); return; }
     const delivered = await guarded(deliver(srv, call, result), DELIVER_TIMEOUT_MS, 'El chat no aceptó el resultado a tiempo.');
     await superviseDelivery({ detected, message: delivered.message, sentOk: delivered.ok });
   }
 
-  // ------------- v1.7.0 · Vigilancia de la entrega: 3 verificaciones y, si hace falta, volver a ejecutar el JSON -------------
-  // El envío ya se intenta 3 veces solo (adapter.sendToolResult). Aquí se comprueba que la IA REACCIONÓ al resultado:
-  //   · si contestó (aunque sea sin JSON) el trabajo terminó: no se toca nada;
-  //   · si tras 3 verificaciones sigue en silencio, se vuelve a ejecutar el JSON que dejó la IA y se entrega el resultado nuevo.
   const REACT_WAIT_MS = 20_000;
   const VERIFY_ROUNDS = 3;
   const MAX_RERUNS = 2;
-  let epoch = 0; // sube cuando el usuario envía algo o llega otra llamada: la vigilancia anterior se cancela sola
+  let epoch = 0;
 
   async function waitForReaction(ms, mine) {
     const end = Date.now() + ms;
@@ -323,13 +288,11 @@
     widget.log('err', `Sin reacción tras ${VERIFY_ROUNDS} verificaciones: ejecuto de nuevo el JSON que dejó la IA (${reruns + 1}/${MAX_RERUNS}).`);
     queue = queue.then(() => processCall({ ...detected, rerun: true, reruns: reruns + 1, extra: 0 }));
   }
-  // ------------- Formato invalido y reconexion (v1.3.0) -------------
 
   let badStreak = 0;
   const MAX_BAD_STREAK = 3;
   const CONN_ERR = /no est.{1,2} conectado|desconectado/i;
 
-  /** La IA envio un mcp_call ilegible: se le devuelve el motivo exacto para que lo corrija (maximo 3 avisos seguidos). */
   async function handleMalformed({ text }) {
     if (!state.settings.bridgeEnabled || !state.tools.length) return;
     badStreak += 1;
@@ -339,7 +302,6 @@
     }
     widget.log('err', `Bloque sin leer (${badStreak}/${MAX_BAD_STREAK}): compruebo que la IA ya termino antes de avisarle.`);
     await paceDelivery();
-    // v1.7.1: tras la espera se vuelve a mirar el chat. Si la IA seguia escribiendo (o el bloque ya se lee), NO se le avisa.
     const again = adapter.getLastText();
     if (adapter.isStreaming() || again !== text || WMB.extractMcpCalls(again).length) {
       badStreak = Math.max(0, badStreak - 1);
@@ -361,7 +323,6 @@
     return false;
   }
 
-  /** Ejecuta la herramienta; si el servidor estaba caido ANTES de enviar, espera la reconexion y reintenta (sin duplicar nada). */
   async function callWithRetry(srv, call, timeoutMessage) {
     let response;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -374,7 +335,6 @@
     return response;
   }
 
-  /** Nunca deja que un fallo o una llamada atascada bloquee las siguientes. */
   async function processCall(detected) {
     try {
       await handleCall(detected);
@@ -383,25 +343,16 @@
     }
   }
 
-  // ───────────── Instrucciones, recordatorio y reenvío periódico ─────────────
-
   let injecting = false;
 
-  /** ¿Ya están las instrucciones (con las herramientas actuales) en esta conversación? */
-  const hasInstructions = () => document.body.textContent.includes(`[WMB:${WMB.toolsSignature(state.tools)}]`);
+  const hasInstructions = () => document.body.textContent.includes(`[WMBX:${WMB.toolsSignature(state.tools)}]`);
 
-  /**
-   * Intercepta el envío del usuario (Enter o botón) y le añade, según el caso:
-   *   · las instrucciones COMPLETAS (primer mensaje, cada N mensajes, o si la IA dijo que no tiene acceso);
-   *   · o una línea de recordatorio (~45 tokens) para que la IA no olvide que tiene herramientas locales.
-   * Solo actúa con eventos reales del usuario (isTrusted), nunca con los que genera la extensión.
-   */
   function interceptSend(event) {
     if (!event.isTrusted || injecting) return;
     adapter.markActivity();
-    epoch += 1; // el usuario envía algo: se cancela cualquier vigilancia de entrega anterior
-    callSeq += 1; // v1.7.1: lo que esperaba en la cola ya es viejo
-    recentCalls.clear(); // mensaje nuevo del usuario: se reinicia el conteo de repeticiones // el usuario envía algo: la respuesta que llegue es NUEVA (no historial)
+    epoch += 1;
+    callSeq += 1;
+    recentCalls.clear();
     const { bridgeEnabled, autoInject, reminder, reinjectEvery } = state.settings;
     if (!bridgeEnabled || !state.tools.length) return;
 
@@ -450,16 +401,13 @@
     if (button && e.target instanceof Node && button.contains(e.target)) interceptSend(e);
   }, true);
 
-  // Cambios en los MCP activos (conexión, herramientas, permisos, ajustes…)
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg?.type === 'STATE_CHANGED') refresh();
   });
 
-  // Al volver a la pestaña o recuperar el foco: estado al día al instante.
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
   window.addEventListener('focus', () => refresh());
 
-  // Latido: el estado nunca queda viejo ni «pegado» aunque la pestaña lleve horas en segundo plano.
   (async () => {
     while (WMB.extensionAlive()) {
       await WMB.sleep(HEARTBEAT_MS);
@@ -470,9 +418,8 @@
   refresh().then(() => {
     adapter.observeResponses(
       (detected) => {
-        // Se procesan en serie para no mezclar resultados.
-        epoch += 1; // llegó una llamada nueva de la IA: la vigilancia anterior ya no hace falta
-        detected.seq = ++callSeq; // v1.7.1
+        epoch += 1;
+        detected.seq = ++callSeq;
         queue = queue.then(() => processCall(detected));
       },
       {
