@@ -10,8 +10,10 @@ import { McpConnection } from './ws_client.js';
 import {
   STORAGE_KEYS as KEYS, LEGACY_STORAGE_KEYS, DEFAULT_SETTINGS, MAX_ACTIVE_SERVERS,
   CALL_TIMEOUT_MS, HISTORY_LIMIT, SUPPORTED_URL_PATTERNS, PERMISSIONS, RESPONSE_DELAY_MAX_MS,
+  NOTICES_URL, NOTICES_EVERY_MS, NOTICES_RETRY_MS, NOTICES_MAX_BYTES,
   DEFAULT_CONTROL_PORT, DEFAULT_LAUNCHER_PORT,
 } from '../shared/constants.js';
+import { compareVersions, normalizeFeed, publicNotices, mergeFeed, safeLink } from './notices.js';
 
 /** @type {Map<string, McpConnection>} serverId → connection */
 const connections = new Map();
@@ -31,7 +33,6 @@ async function loadState() {
   const stored = data[KEYS.settings] ?? {};
   const settings = { ...DEFAULT_SETTINGS, ...stored };
   delete settings.checkUpdates;
-  delete settings.showNotices;
   if (!PERMISSIONS.includes(stored.defaultPermission)) settings.defaultPermission = stored.autoExecute ? 'allow' : 'ask';
   const servers = (data[KEYS.servers] ?? []).filter((s) => s.url).map((s) => ({
     ...s,
@@ -40,12 +41,10 @@ async function loadState() {
   return { servers, settings };
 }
 
-/** Servers that can connect and be used: enabled, with a URL, and not blocked. */
 const isUsable = (s) => s.enabled && s.url && s.permission !== 'deny';
 
 const saveServers = (servers) => chrome.storage.local.set({ [KEYS.servers]: servers });
 
-/** Human-readable unique identifier the AI uses to name each server. */
 function assignSlugs(servers) {
   const used = new Set();
   const slugs = new Map();
@@ -178,7 +177,9 @@ function onConnectionChange(evt) {
 }
 
 async function updateBadge(enabled) {
-  await chrome.action.setBadgeText({ text: !enabled ? 'OFF' : '' });
+  let unread = 0;
+  try { unread = (await readNotices()).unread; } catch { /* no stored notices */ }
+  await chrome.action.setBadgeText({ text: !enabled ? 'OFF' : (unread ? (unread > 9 ? '9+' : String(unread)) : '') });
   await chrome.action.setBadgeBackgroundColor({ color: !enabled ? '#8a8078' : '#c9803a' });
 }
 async function reconcile() {
@@ -216,6 +217,7 @@ async function getSnapshot() {
     ok: true,
     settings,
     version: localVersion(),
+    notices: await readNotices(),
     bridge: publicBridge(),
     max: MAX_ACTIVE_SERVERS,
     servers: servers.map((s) => {
@@ -410,19 +412,6 @@ function publicBridge() {
   return { ...rest, canControl: bridgeCanControl() };
 }
 
-function compareVersions(a, b) {
-  if (!a || !b) return null;
-  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
-  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i += 1) {
-    const da = pa[i] ?? 0;
-    const db = pb[i] ?? 0;
-    if (da !== db) return da - db;
-  }
-  return 0;
-}
-
 const OLD_BRIDGE = 'Your bridge is older and does not support this action. Close it and open it once with server/restart_bridge.cmd; the button will work afterwards.';
 
 async function launcherFetch(path, { method = 'GET', timeout = 1500 } = {}) {
@@ -591,6 +580,104 @@ async function openConfig() {
   }
 }
 
+// ------------- Author notices -------------
+
+const readNoticesRecord = async () => (await chrome.storage.local.get(KEYS.notices))[KEYS.notices] ?? null;
+const readNotices = async () => publicNotices(await readNoticesRecord());
+
+function notifyNotice(notice) {
+  try {
+    chrome.notifications?.create?.(`wmb-notice:${notice.id}`, {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+      title: notice.title,
+      message: notice.message || 'Open Web MCP Bridge to see the details.',
+      priority: notice.level === 'warning' ? 1 : 0,
+    }, () => {
+      if (chrome.runtime.lastError) console.warn('[WMB] notice notification not shown:', chrome.runtime.lastError.message);
+    });
+  } catch { /* no notification permission */ }
+}
+
+async function fetchNoticesFeed() {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const res = await fetch(`${NOTICES_URL}?t=${Date.now()}`, { cache: 'no-store', credentials: 'omit', signal: ctl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (new URL(res.url || NOTICES_URL).hostname !== new URL(NOTICES_URL).hostname) throw new Error('Response from an unexpected site.');
+    const text = await res.text();
+    if (text.length > NOTICES_MAX_BYTES) throw new Error('The notices file is too large.');
+    return JSON.parse(text);
+  } finally { clearTimeout(timer); }
+}
+
+let noticesRun = null;
+function checkNotices(force = false) {
+  if (noticesRun) return noticesRun;
+  noticesRun = runNoticesCheck(force).finally(() => { noticesRun = null; });
+  return noticesRun;
+}
+
+async function failNotices(message) {
+  await withLock(async () => {
+    const prev = (await readNoticesRecord()) ?? { items: [], read: [], dismissed: [], notified: [] };
+    await chrome.storage.local.set({ [KEYS.notices]: { ...prev, checkedAt: Date.now() - NOTICES_EVERY_MS + NOTICES_RETRY_MS, error: message } });
+  });
+  return { ok: false, error: message };
+}
+
+async function runNoticesCheck(force) {
+  const { settings } = await loadState();
+  if (!force && settings.showNotices === false) return { ok: true, skipped: true };
+  if (!force) {
+    const prev = await readNoticesRecord();
+    if (Date.now() - (prev?.checkedAt ?? 0) < NOTICES_EVERY_MS) return { ok: true, throttled: true };
+  }
+  let feed;
+  try {
+    feed = await fetchNoticesFeed();
+  } catch (err) {
+    const reason = err?.name === 'AbortError' ? 'no response' : err instanceof SyntaxError ? 'the file is not valid JSON' : (err?.message ?? 'error');
+    return failNotices(`Could not fetch notices (${reason}).`);
+  }
+  const parsed = normalizeFeed(feed, { version: localVersion() });
+  if (!parsed.ok) return failNotices(parsed.error);
+
+  const result = await withLock(async () => {
+    const latest = await readNoticesRecord();
+    const { record, toNotify } = mergeFeed(latest, parsed.items);
+    await chrome.storage.local.set({ [KEYS.notices]: record });
+    return { record, toNotify };
+  });
+  if (settings.showNotices !== false) result.toNotify.slice(0, 3).forEach(notifyNotice);
+  await updateBadge(settings.bridgeEnabled).catch(() => {});
+  return { ok: true, count: parsed.items.length, skipped: parsed.skipped, notices: publicNotices(result.record) };
+}
+
+async function markNoticesRead(ids, { dismiss = false } = {}) {
+  await withLock(async () => {
+    const rec = await readNoticesRecord();
+    if (!rec) return;
+    const targets = ids === 'all' ? rec.items.map((n) => n.id) : (Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : []);
+    rec.read = [...new Set([...(rec.read ?? []), ...targets])];
+    if (dismiss) rec.dismissed = [...new Set([...(rec.dismissed ?? []), ...targets])];
+    await chrome.storage.local.set({ [KEYS.notices]: rec });
+  });
+  updateBadge((await loadState()).settings.bridgeEnabled).catch(() => {});
+  return { ok: true, notices: await readNotices() };
+}
+
+chrome.notifications?.onClicked?.addListener(async (id) => {
+  if (!String(id).startsWith('wmb-notice:')) return;
+  const noticeId = String(id).slice('wmb-notice:'.length);
+  const rec = await readNoticesRecord().catch(() => null);
+  const link = safeLink(rec?.items?.find((n) => n.id === noticeId)?.url);
+  if (link) chrome.tabs.create({ url: link });
+  await markNoticesRead([noticeId]).catch(() => {});
+  chrome.notifications.clear(id);
+});
+
 async function reinjectContentScripts() {
   if (!chrome.scripting?.executeScript) return;
   for (const cs of chrome.runtime.getManifest?.().content_scripts ?? []) {
@@ -613,6 +700,10 @@ async function handleMessage(msg, sender) {
     case 'DISCOVER':
       if (msg.reset) await chrome.storage.local.remove(KEYS.dismissed);
       return discoverServers(true);
+    case 'GET_NOTICES': return { ok: true, notices: await readNotices() };
+    case 'CHECK_NOTICES': return checkNotices(true);
+    case 'READ_NOTICES': return markNoticesRead(msg.ids ?? 'all');
+    case 'DISMISS_NOTICE': return markNoticesRead([msg.id], { dismiss: true });
     case 'RESTART_BRIDGE': return restartBridge();
     case 'START_BRIDGE': return bridgeGlobal('start');
     case 'STOP_BRIDGE': return bridgeGlobal('stop');
@@ -654,14 +745,17 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     await chrome.storage.local.remove(LEGACY_STORAGE_KEYS).catch(() => {});
     await reconcile();
     if (details?.reason === 'install' || details?.reason === 'update') reinjectContentScripts().catch(() => {});
+    if (details?.reason === 'install') chrome.tabs.create({ url: chrome.runtime.getURL('welcome/welcome.html') }).catch(() => {});
+    checkNotices().catch(() => {});
   } catch (err) {
-    console.warn('[WMBX] onInstalled interrupted:', err?.message ?? err);
+    console.warn('[WMB] onInstalled interrupted:', err?.message ?? err);
   }
 });
 chrome.alarms.create('wmbx-keepalive', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'wmbx-keepalive') { reconcile().catch(() => {}); discoverServers().catch(() => {}); }
+  if (alarm.name === 'wmbx-keepalive') { reconcile().catch(() => {}); discoverServers().catch(() => {}); checkNotices().catch(() => {}); }
 });
 
-reconcile().then(() => discoverServers(true)).catch((err) => console.error('[WMBX] reconcile', err));
+reconcile().then(() => discoverServers(true)).catch((err) => console.error('[WMB] reconcile', err));
 chrome.storage.local.remove(LEGACY_STORAGE_KEYS).catch(() => {});
+checkNotices().catch(() => {});

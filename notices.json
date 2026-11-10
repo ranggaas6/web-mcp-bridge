@@ -1,0 +1,24 @@
+{
+  "notices": [
+    {
+      "id": "2026-11-v1.7.0-r2",
+      "title": "Web MCP Bridge (Fork) 1.7.0",
+      "message": "Fixed: stale replies being re-sent (echo), messages not going out (now 3 automatic retries), false unreadable-JSON notices, and old bridges staying alive. New: JSON editor to add MCPs, configurable response delay, global start/stop/restart button, and Rescan button. Fixed: Allow always / Run buttons being cut off.",
+      "url": "https://github.com/ranggaas6/web-mcp-bridge",
+      "level": "update",
+      "date": "2026-11-10",
+      "expires": "2027-02-10",
+      "maxVersion": "1.7.0"
+    },
+    {
+      "id": "2026-11-v1.5.0",
+      "title": "Web MCP Bridge (Fork) 1.5.0",
+      "message": "New version with fixes for DeepSeek, JSON fixes, and a design change. Thanks for using the extension.",
+      "url": "https://github.com/ranggaas6/web-mcp-bridge",
+      "level": "info",
+      "date": "2026-11-02",
+      "expires": "2027-02-01",
+      "maxVersion": "1.5.0"
+    }
+  ]
+}

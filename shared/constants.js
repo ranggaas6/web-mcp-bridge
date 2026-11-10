@@ -12,14 +12,13 @@ export const RECOMMENDED_ACTIVE_SERVERS = 1;
 /**
  * Fork-specific storage namespace.
  * `wmbx_` prefix avoids colliding with the original extension (`wmb_`).
- * Chrome isolates storage per extension, but a distinct namespace keeps exports,
- * imports, and DevTools debugging unambiguous.
  */
 export const STORAGE_KEYS = {
   servers: 'wmbx_servers',
   settings: 'wmbx_settings',
   history: 'wmbx_history',
   dismissed: 'wmbx_dismissed',
+  notices: 'wmbx_notices',
   bridge: 'wmbx_bridge',
 };
 
@@ -63,6 +62,8 @@ export const DEFAULT_SETTINGS = {
   controlPort: DEFAULT_CONTROL_PORT,
   /** Fork launcher port. Must match `launcher_port` in servers.json. */
   launcherPort: DEFAULT_LAUNCHER_PORT,
+  /** Show the author's notices (what's new, updates, incidents). */
+  showNotices: true,
   /** Delay (ms) before delivering each result to the chat. */
   responseDelayMs: 1500,
 };
@@ -72,6 +73,18 @@ export const RESPONSE_DELAY_MAX_MS = 60_000;
 
 /** Demo server shipped with the repository (server/examples/demo_mcp_server.py). */
 export const DEMO_SERVER = { name: 'demo', url: 'ws://localhost:8190' };
+
+/**
+ * Author notices: public notices.json in the fork repo (no server of our own).
+ */
+export const NOTICES_URL = 'https://raw.githubusercontent.com/ranggaas6/web-mcp-bridge/main/notices.json';
+export const NOTICES_EVERY_MS = 10 * 60 * 1000;
+export const NOTICES_RETRY_MS = 5 * 60 * 1000;
+export const NOTICES_MAX_BYTES = 64 * 1024;
+export const NOTICES_MAX_ITEMS = 20;
+/** Notice links may only point to these sites (https). */
+export const NOTICE_LINK_HOSTS = ['github.com', 'gist.github.com'];
+export const NOTICE_LINK_SUFFIXES = ['.github.io'];
 
 export const PROTOCOL_VERSION = '2025-03-26';
 export const CALL_TIMEOUT_MS = 120_000;
