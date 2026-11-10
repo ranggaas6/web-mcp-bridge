@@ -1,15 +1,15 @@
 /**
- * popup.js - Panel de control de la extensión.
+ * popup.js - Extension control panel.
  *
- * Los servidores MCP se definen en server/servers.json (la extensión los detecta sola): aquí solo se activan,
- * se les da permiso y se prueban. Desde el panel se puede abrir ese archivo y reiniciar el puente.
- * Las tarjetas se reutilizan entre refrescos (no se recrean), así las transiciones se animan en lugar de saltar.
+ * MCP servers are defined in server/servers.json (auto-detected): here they are only enabled,
+ * granted permissions, and tested. From this panel the file can be opened and the bridge restarted.
+ * Cards are reused between refreshes (never recreated), so transitions animate instead of jumping.
  */
 import { MAX_ACTIVE_SERVERS, RECOMMENDED_ACTIVE_SERVERS, PERMISSIONS, PERMISSION_LABELS, DEMO_SERVER } from '../shared/constants.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const STATUS_TEXT = {
-  connected: 'Conectado', connecting: 'Conectando…', disconnected: 'Sin conexión (reintentando)', error: 'Error de conexión',
+  connected: 'Connected', connecting: 'Connecting…', disconnected: 'Disconnected (reconnecting)', error: 'Connection error',
 };
 const DEMO_TOOL = 'info_sistema';
 
@@ -23,11 +23,10 @@ const ICONS = {
 };
 for (const el of document.querySelectorAll('.ico[data-ico]')) el.innerHTML = ICONS[el.dataset.ico] ?? '';
 
-/** Envía un mensaje al service worker y lanza excepción si la respuesta no es ok. */
 async function api(type, payload = {}) {
   let res;
   try { res = await chrome.runtime.sendMessage({ type, ...payload }); } catch (err) { throw new Error(err.message); }
-  if (!res?.ok) throw new Error(res?.error ?? 'Error desconocido.');
+  if (!res?.ok) throw new Error(res?.error ?? 'Unknown error.');
   return res;
 }
 
@@ -44,9 +43,8 @@ const guard = (fn) => async (...args) => {
   await refresh(true);
 };
 
-/** Solo se abren enlaces https (el service worker ya los valida; esto es un segundo candado). */
 const openLink = (url) => {
-  try { if (new URL(url).protocol === 'https:') chrome.tabs.create({ url }); } catch { /* enlace inválido */ }
+  try { if (new URL(url).protocol === 'https:') chrome.tabs.create({ url }); } catch { /* invalid link */ }
 };
 
 const setLabel = (btn, text) => { btn.querySelector('span:not(.ico)').textContent = text; };
@@ -57,9 +55,9 @@ const isDemo = (server) => {
   try { return new URL(server.url).port === new URL(DEMO_SERVER.url).port; } catch { return false; }
 };
 
-let latest = null; // último estado recibido
+let latest = null;
 
-// ───────────────────────── Puente ─────────────────────────
+// ───────────────────────── Bridge ─────────────────────────
 
 let restarting = false;
 let opening = false;
@@ -75,50 +73,50 @@ function renderBridge(state) {
 
   if (!b.checked) {
     dot.className = 'dot connecting';
-    title.textContent = 'Comprobando el puente…';
+    title.textContent = 'Checking bridge…';
     sub.textContent = '';
   } else if (b.online) {
     dot.className = 'dot online';
-    title.textContent = 'Puente conectado';
+    title.textContent = 'Bridge connected';
     const listening = state.servers.filter((s) => s.bridgeStatus === 'listening').length;
-    sub.textContent = `v${b.version ?? '?'} · ${listening} servidor${listening === 1 ? '' : 'es'} publicado${listening === 1 ? '' : 's'}`;
+    sub.textContent = `v${b.version ?? '?'} · ${listening} server${listening === 1 ? '' : 's'} published`;
   } else {
     dot.className = 'dot offline';
-    title.textContent = 'Puente apagado';
-    sub.textContent = 'La extensión no lo encuentra en este equipo.';
+    title.textContent = 'Bridge is off';
+    sub.textContent = 'The extension cannot find it on this machine.';
   }
 
   cfgErr.hidden = !(b.online && b.configError);
-  if (!cfgErr.hidden) cfgErr.textContent = `servers.json tiene un error: ${b.configError}. Corrígelo y guarda: el puente lo recarga solo (mientras tanto sigue con la configuración anterior).`;
+  if (!cfgErr.hidden) cfgErr.textContent = `servers.json has an error: ${b.configError}. Fix it and save: the bridge reloads automatically (previous config stays active meanwhile).`;
 
   hint.hidden = !(b.checked && !b.online);
   if (!hint.hidden) {
     if (b.launcherOnline) {
       hint.textContent = b.paused
-        ? 'El puente est\u00e1 apagado a prop\u00f3sito. Pulsa \u00abIniciar puente\u00bb para encenderlo.'
-        : 'El puente se ha ca\u00eddo; el lanzador lo est\u00e1 levantando. Si no vuelve, pulsa \u00abIniciar puente\u00bb.';
+        ? 'The bridge is off on purpose. Click "Start bridge" to turn it on.'
+        : 'The bridge crashed; the launcher is restarting it. If it does not come back, click "Start bridge".';
     } else {
-      hint.replaceChildren('Para encenderlo desde aqu\u00ed, instala el lanzador una vez: doble clic en ', Object.assign(document.createElement('code'), { textContent: 'server/install.cmd' }),
-        '. Mientras tanto puedes abrirlo a mano con ', Object.assign(document.createElement('code'), { textContent: 'server/start_bridge_loop.pyw' }), '.');
+      hint.replaceChildren('To start it from here, install the launcher once: double-click ', Object.assign(document.createElement('code'), { textContent: 'server/install.cmd' }),
+        '. Meanwhile you can start it manually with ', Object.assign(document.createElement('code'), { textContent: 'server/start_bridge_loop.pyw' }), '.');
     }
   }
 
   const toggle = $('#toggle-bridge');
   if (!togglingBridge) {
-    setLabel(toggle, b.online ? 'Apagar puente' : 'Iniciar puente');
+    setLabel(toggle, b.online ? 'Stop bridge' : 'Start bridge');
     toggle.disabled = !b.checked || !b.launcherOnline;
     toggle.title = b.launcherOnline
-      ? (b.online ? 'Apaga el puente (queda apagado hasta que lo inicies de nuevo)' : 'Enciende el puente')
-      : 'Necesita el lanzador: se instala una vez con server/install.cmd';
+      ? (b.online ? 'Stops the bridge (it stays off until you start it again)' : 'Starts the bridge')
+      : 'Requires the launcher: install once with server/install.cmd';
   }
 
   const restart = $('#restart-bridge');
   if (!restarting) {
     restart.disabled = !b.checked || (!b.online && !b.launcherOnline);
-    setLabel(restart, b.online ? 'Reiniciar puente' : 'Encender (reiniciar)');
-    restart.title = (!b.online && !b.launcherOnline) ? 'Necesita el lanzador: se instala una vez con server/install.cmd' : 'Cierra TODOS los puentes (de cualquier carpeta) y abre uno nuevo; si estaba apagado, lo enciende';
+    setLabel(restart, b.online ? 'Restart bridge' : 'Start (restart)');
+    restart.title = (!b.online && !b.launcherOnline) ? 'Requires the launcher: install once with server/install.cmd' : 'Closes ALL bridges (from any folder) and opens a fresh one; starts it if it was off';
   }
-  $('#open-config').title = b.config ? `Abrir ${b.config}` : 'Abrir servers.json en tu editor';
+  $('#open-config').title = b.config ? `Open ${b.config}` : 'Open servers.json in your editor';
 }
 
 $('#open-config').addEventListener('click', async (event) => {
@@ -127,10 +125,10 @@ $('#open-config').addEventListener('click', async (event) => {
   setBusy(event.currentTarget, true);
   try {
     await api('OPEN_CONFIG');
-    toast('Abriendo servers.json… guarda el archivo y el puente lo recarga solo.');
+    toast('Opening servers.json… save the file and the bridge reloads automatically.');
   } catch (err) {
     const path = latest?.bridge?.config;
-    toast(path && !err.message.includes(path) ? `${err.message} Archivo: ${path}` : err.message, 6500);
+    toast(path && !err.message.includes(path) ? `${err.message} File: ${path}` : err.message, 6500);
   } finally {
     opening = false;
     setBusy(event.currentTarget, false);
@@ -142,7 +140,7 @@ $('#open-editor').addEventListener('click', async () => {
   try {
     const [existing] = await chrome.tabs.query({ url });
     if (existing) { await chrome.tabs.update(existing.id, { active: true }); await chrome.windows.update(existing.windowId, { focused: true }); window.close(); return; }
-  } catch { /* sin permiso para consultar pestañas: se abre una nueva */ }
+  } catch { /* no tab permission: open a new one */ }
   chrome.tabs.create({ url });
   window.close();
 });
@@ -153,10 +151,10 @@ $('#toggle-bridge').addEventListener('click', async (event) => {
   const turnOff = Boolean(latest?.bridge?.online);
   togglingBridge = true;
   setBusy(btn, true);
-  setLabel(btn, turnOff ? 'Apagando\u2026' : 'Iniciando\u2026');
+  setLabel(btn, turnOff ? 'Stopping…' : 'Starting…');
   try {
     const res = await api(turnOff ? 'STOP_BRIDGE' : 'START_BRIDGE');
-    toast(turnOff ? 'Puente apagado.' : (res.configError ? 'Puente iniciado, pero servers.json tiene un error.' : 'Puente iniciado \u2713'), 4200);
+    toast(turnOff ? 'Bridge stopped.' : (res.configError ? 'Bridge started, but servers.json has an error.' : 'Bridge started ✓'), 4200);
   } catch (err) {
     toast(err.message, 7000);
   } finally {
@@ -170,26 +168,25 @@ $('#restart-bridge').addEventListener('click', async (event) => {
   const btn = event.currentTarget;
   restarting = true;
   setBusy(btn, true);
-  setLabel(btn, 'Reiniciando…');
+  setLabel(btn, 'Restarting…');
   try {
     const res = await api('BRIDGE_GLOBAL', { action: 'restart' });
-    toast(res.configError ? 'Puente reiniciado, pero servers.json tiene un error.' : 'Puente reiniciado ✓', 4200);
+    toast(res.configError ? 'Bridge restarted, but servers.json has an error.' : 'Bridge restarted ✓', 4200);
   } catch (err) {
     toast(err.message, 7000);
   } finally {
     restarting = false;
     setBusy(btn, false);
-    setLabel(btn, latest?.bridge?.online ? 'Reiniciar puente' : 'Encender (reiniciar)');
+    setLabel(btn, latest?.bridge?.online ? 'Restart bridge' : 'Start (restart)');
     await refresh(true);
   }
 });
 
-// ───────────────────────── Servidores ─────────────────────────
+// ───────────────────────── Servers ─────────────────────────
 
-const cards = new Map();        // id → { li, els, server }
-const demoOutputs = new Map();  // id → { ok, text }
+const cards = new Map();
+const demoOutputs = new Map();
 
-/** Selector de 3 estados: Permitir siempre · Preguntar siempre · No permitir. */
 function permSelect(onChange, label) {
   const select = document.createElement('select');
   select.className = 'perm';
@@ -221,23 +218,23 @@ function buildCard(server) {
   const manual = document.createElement('span');
   manual.className = 'badge';
   manual.textContent = 'manual';
-  manual.title = 'Añadido a mano en versiones anteriores (no viene de servers.json)';
+  manual.title = 'Added by hand in older versions (not from servers.json)';
   const demo = document.createElement('span');
   demo.className = 'badge demo';
   demo.textContent = 'demo';
-  demo.title = 'Servidor de prueba incluido con la extensión';
+  demo.title = 'Test server shipped with the extension';
   name.append(dot, title, manual, demo);
   const meta = document.createElement('div');
   meta.className = 'meta';
 
   const tools = document.createElement('div');
   tools.className = 'tools';
-  const select = permSelect((value) => api('SET_PERMISSION', { id: card.server.id, permission: value }), `Permiso de ${server.name}`);
+  const select = permSelect((value) => api('SET_PERMISSION', { id: card.server.id, permission: value }), `Permission for ${server.name}`);
   const test = document.createElement('button');
   test.type = 'button';
   test.className = 'test-btn';
-  test.innerHTML = `${ICONS.play}<span>Probar</span>`;
-  test.title = 'Ejecuta info_sistema: te muestra datos reales de tu equipo (lo activa si hace falta)';
+  test.innerHTML = `${ICONS.play}<span>Test</span>`;
+  test.title = 'Runs info_sistema: shows real machine data (enables the demo if needed)';
   test.addEventListener('click', () => runDemo(card));
   tools.append(select, test);
   info.append(name, meta, tools);
@@ -248,11 +245,11 @@ function buildCard(server) {
   remove.type = 'button';
   remove.className = 'icon-btn danger';
   remove.innerHTML = ICONS.trash;
-  remove.title = 'Quitar de la extensión';
-  remove.setAttribute('aria-label', 'Quitar de la extensión');
-  remove.dataset.armed = '¿Seguro?';
+  remove.title = 'Remove from the extension';
+  remove.setAttribute('aria-label', 'Remove from the extension');
+  remove.dataset.armed = 'Sure?';
   remove.addEventListener('click', () => {
-    if (!remove.classList.contains('armed')) { // primer clic: pide confirmación en el propio botón
+    if (!remove.classList.contains('armed')) {
       remove.classList.add('armed');
       clearTimeout(remove.timer);
       remove.timer = setTimeout(() => remove.classList.remove('armed'), 2600);
@@ -273,10 +270,10 @@ function updateCard(card, server, activeCount) {
   const { li, els } = card;
   li.classList.toggle('on', server.enabled);
 
-  els.toggle.title = server.enabled ? 'Desactivar' : 'Activar';
+  els.toggle.title = server.enabled ? 'Disable' : 'Enable';
   els.checkbox.checked = server.enabled;
   els.checkbox.disabled = !server.enabled && activeCount >= MAX_ACTIVE_SERVERS;
-  els.checkbox.setAttribute('aria-label', `Activar ${server.name}`);
+  els.checkbox.setAttribute('aria-label', `Enable ${server.name}`);
 
   const bridgeBroken = server.bridgeStatus === 'error';
   els.dot.className = `dot ${bridgeBroken ? 'error' : (server.enabled ? server.status : '')}`;
@@ -284,13 +281,13 @@ function updateCard(card, server, activeCount) {
   els.title.title = server.name;
   els.manual.hidden = Boolean(server.auto);
   els.demo.hidden = !isDemo(server);
-  els.remove.parentElement.hidden = Boolean(server.auto); // los de servers.json se quitan editando el archivo
+  els.remove.parentElement.hidden = Boolean(server.auto);
 
   let meta;
-  if (bridgeBroken) meta = `${server.url} · El puente no pudo abrirlo: ${server.bridgeError ?? 'error'}`;
-  else if (server.permission === 'deny') meta = `${server.url} · Bloqueado (no se describe a la IA)`;
+  if (bridgeBroken) meta = `${server.url} · The bridge could not open it: ${server.bridgeError ?? 'error'}`;
+  else if (server.permission === 'deny') meta = `${server.url} · Blocked (not described to the AI)`;
   else if (server.enabled) {
-    meta = `${server.url} · ${STATUS_TEXT[server.status] ?? server.status}${server.status === 'connected' ? ` · ${server.toolCount} herramientas` : ''}`;
+    meta = `${server.url} · ${STATUS_TEXT[server.status] ?? server.status}${server.status === 'connected' ? ` · ${server.toolCount} tools` : ''}`;
   } else meta = server.url;
   els.meta.textContent = meta;
   els.meta.classList.toggle('err', bridgeBroken);
@@ -305,7 +302,7 @@ function updateCard(card, server, activeCount) {
     if (!els.out) {
       els.out = document.createElement('div');
       els.out.className = 'demo-out';
-      els.out.title = 'Clic para ocultar';
+      els.out.title = 'Click to hide';
       els.out.append(document.createElement('pre'));
       els.out.addEventListener('click', () => { demoOutputs.delete(card.server.id); updateCard(card, card.server, activeCount); });
       li.append(els.out);
@@ -318,7 +315,6 @@ function updateCard(card, server, activeCount) {
   }
 }
 
-/** Prueba rápida: activa el demo si hace falta y ejecuta info_sistema. */
 async function runDemo(card) {
   const btn = card.els.test;
   btn.disabled = true;
@@ -326,9 +322,9 @@ async function runDemo(card) {
     if (!card.server.enabled) await api('TOGGLE_SERVER', { id: card.server.id, enabled: true });
     const res = await api('CALL_TOOL', { server: card.server.slug ?? card.server.name, name: DEMO_TOOL, arguments: {} });
     const text = (res.result?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim();
-    demoOutputs.set(card.server.id, { ok: !res.result?.isError, text: text || 'El servidor respondió sin texto.' });
+    demoOutputs.set(card.server.id, { ok: !res.result?.isError, text: text || 'The server replied without text.' });
   } catch (err) {
-    const hint = /no existe|no está conectado/.test(err.message) ? '\nReinicia el puente para cargar la demo actualizada.' : '';
+    const hint = /no existe|not active|not connected/.test(err.message) ? '\nRestart the bridge to load the updated demo.' : '';
     demoOutputs.set(card.server.id, { ok: false, text: err.message + hint });
   } finally {
     btn.disabled = false;
@@ -340,13 +336,13 @@ function renderServers(state) {
   const list = $('#server-list');
   const active = state.servers.filter((s) => s.enabled);
 
-  $('#counter').textContent = `${active.length}/${MAX_ACTIVE_SERVERS} activos`;
+  $('#counter').textContent = `${active.length}/${MAX_ACTIVE_SERVERS} active`;
   const tokens = active.reduce((sum, s) => sum + s.approxTokens, 0);
-  $('#tokens').textContent = active.length ? `≈ ${tokens.toLocaleString('es')} tokens de herramientas` : '';
+  $('#tokens').textContent = active.length ? `≈ ${tokens.toLocaleString('en')} tool tokens` : '';
 
   const warning = $('#warning');
   warning.hidden = active.length <= RECOMMENDED_ACTIVE_SERVERS;
-  warning.textContent = `Tienes ${active.length} MCP activos. Cada herramienta ocupa contexto de la IA y puede saturarlo. Lo recomendable es 1 a la vez.`;
+  warning.textContent = `You have ${active.length} MCPs active. Every tool takes context and may saturate the AI. Recommended: 1 at a time.`;
   $('#empty').hidden = state.servers.length > 0;
 
   const seen = new Set();
@@ -371,7 +367,6 @@ function renderServers(state) {
   }
 }
 
-/** Selector global: muestra «Mixto» si los MCP tienen permisos distintos. */
 function renderGlobalPermission(servers) {
   const select = $('#perm-all');
   const perms = new Set(servers.map((s) => s.permission));
@@ -380,87 +375,15 @@ function renderGlobalPermission(servers) {
   select.dataset.perm = value;
   $('#perm-all').closest('.perm-all').hidden = servers.length === 0;
   $('#perm-hint').textContent = {
-    allow: 'Los tienes todos permitidos: no se pregunta nada.',
-    ask: 'Se pregunta en cada llamada de la IA.',
-    deny: 'Todos bloqueados: la IA no recibe ninguna herramienta.',
-    mixed: 'Cada MCP tiene un permiso distinto.',
+    allow: 'All allowed: nothing is asked.',
+    ask: 'Asked on every AI call.',
+    deny: 'All blocked: the AI receives no tools.',
+    mixed: 'Each MCP has a different permission.',
   }[value];
 }
 $('#perm-all').addEventListener('change', guard((e) => api('SET_ALL_PERMISSIONS', { permission: e.target.value })));
 
-// ───────────────────────── Avisos ─────────────────────────
-
-const LEVEL_TEXT = { info: 'Novedad', update: 'Versión nueva', warning: 'Importante' };
-let noticesSig = '';
-
-function renderNotices(state) {
-  const data = state.notices ?? { items: [], unread: 0 };
-  const badge = $('#notices-badge');
-  badge.hidden = !data.unread;
-  badge.textContent = data.unread > 9 ? '9+' : String(data.unread);
-
-  const sig = JSON.stringify([data.items, data.checkedAt, data.error]);
-  if (sig === noticesSig) return;
-  noticesSig = sig;
-
-  const list = $('#notice-list');
-  list.replaceChildren();
-  $('#notices-empty').hidden = data.items.length > 0;
-  $('#read-all').hidden = !data.unread;
-
-  for (const n of data.items) {
-    const li = document.createElement('li');
-    li.className = `notice ${n.level}${n.unread ? ' unread' : ''}`;
-    const title = document.createElement('div');
-    title.className = 'n-title';
-    title.textContent = n.title;
-    const date = document.createElement('div');
-    date.className = 'n-date';
-    date.textContent = [LEVEL_TEXT[n.level], n.date ? new Date(n.date).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' }) : null].filter(Boolean).join(' · ');
-    li.append(title, date);
-    if (n.message) {
-      const msg = document.createElement('div');
-      msg.className = 'n-msg';
-      msg.textContent = n.message;
-      li.append(msg);
-    }
-    const actions = document.createElement('div');
-    actions.className = 'n-actions';
-    if (n.url) {
-      const open = document.createElement('button');
-      open.type = 'button';
-      open.className = 'primary small';
-      open.textContent = 'Ver en GitHub';
-      open.addEventListener('click', guard(async () => { openLink(n.url); await api('READ_NOTICES', { ids: [n.id] }); }));
-      actions.append(open);
-    }
-    const dismiss = document.createElement('button');
-    dismiss.type = 'button';
-    dismiss.className = 'soft small';
-    dismiss.textContent = 'Descartar';
-    dismiss.addEventListener('click', guard(() => api('DISMISS_NOTICE', { id: n.id })));
-    actions.append(dismiss);
-    li.append(actions);
-    list.append(li);
-  }
-
-  const when = data.checkedAt ? `Revisado ${new Date(data.checkedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' })}` : 'Aún sin revisar';
-  $('#notices-line').textContent = data.error ? `${data.error}` : when;
-}
-$('#read-all').addEventListener('click', guard(() => api('READ_NOTICES', { ids: 'all' })));
-$('#check-notices').addEventListener('click', async (event) => {
-  const btn = event.currentTarget;
-  setBusy(btn, true);
-  try {
-    const res = await api('CHECK_NOTICES');
-    toast(res.count ? `Hay ${res.count} aviso${res.count === 1 ? '' : 's'} vigente${res.count === 1 ? '' : 's'}.` : 'No hay avisos nuevos.');
-  } catch (err) { toast(err.message, 5000); }
-  setBusy(btn, false);
-  noticesSig = '';
-  await refresh(true);
-});
-
-// ───────────────────────── Historial ─────────────────────────
+// ───────────────────────── History ─────────────────────────
 
 let historySig = '';
 async function renderHistory() {
@@ -483,19 +406,19 @@ async function renderHistory() {
     status.textContent = h.status === 'ok' ? `OK${h.ms ? ` · ${h.ms} ms` : ''}` : 'Error';
     row.append(title, status);
     const detail = document.createElement('small');
-    detail.textContent = `${new Date(h.ts).toLocaleTimeString('es')} · ${h.error ?? h.args}`;
+    detail.textContent = `${new Date(h.ts).toLocaleTimeString('en')} · ${h.error ?? h.args}`;
     li.append(row, detail);
     list.append(li);
   });
 }
 $('#clear-history').addEventListener('click', guard(async () => { await api('CLEAR_HISTORY'); historySig = ''; }));
 
-// ───────────────────────── Ajustes ─────────────────────────
+// ───────────────────────── Settings ─────────────────────────
 
 function renderSettings(state) {
   const { settings } = state;
   $('#master').checked = settings.bridgeEnabled;
-  $('#master-label').textContent = settings.bridgeEnabled ? 'Activado' : 'Desactivado';
+  $('#master-label').textContent = settings.bridgeEnabled ? 'Enabled' : 'Disabled';
   $('#main').classList.toggle('off', !settings.bridgeEnabled);
   if (document.activeElement?.id !== 'set-maxResultChars') $('#set-maxResultChars').value = settings.maxResultChars;
   $('#set-autoInject').checked = settings.autoInject;
@@ -504,19 +427,18 @@ function renderSettings(state) {
   $('#set-autoDiscover').checked = settings.autoDiscover !== false;
   $('#set-autoEnableDiscovered').checked = Boolean(settings.autoEnableDiscovered);
   $('#set-focusFallback').checked = settings.focusFallback;
-  $('#set-showNotices').checked = settings.showNotices !== false;
   if (document.activeElement?.id !== 'set-reinjectEvery') $('#set-reinjectEvery').value = settings.reinjectEvery;
   if (document.activeElement?.id !== 'set-responseDelaySec') $('#set-responseDelaySec').value = (settings.responseDelayMs ?? 1500) / 1000;
 
   $('#version').textContent = state.version ? `v${state.version}` : '';
-  $('#version-line').textContent = state.version ? `Web MCP Bridge v${state.version}` : '';
+  $('#version-line').textContent = state.version ? `Web MCP Bridge (Fork) v${state.version}` : '';
 }
 
-$('#gh-link').addEventListener('click', (e) => { e.preventDefault(); openLink('https://github.com/AstraxOf'); });
+$('#gh-link').addEventListener('click', (e) => { e.preventDefault(); openLink('https://github.com/ranggaas6/web-mcp-bridge'); });
 
 $('#master').addEventListener('change', guard((e) => api('UPDATE_SETTINGS', { settings: { bridgeEnabled: e.target.checked } })));
 
-for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'autoDiscover', 'autoEnableDiscovered', 'showNotices']) {
+for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'autoDiscover', 'autoEnableDiscovered']) {
   $(`#set-${key}`).addEventListener('change', guard((e) => api('UPDATE_SETTINGS', { settings: { [key]: e.target.checked } })));
 }
 $('#set-reinjectEvery').addEventListener('change', guard((e) => {
@@ -529,14 +451,14 @@ $('#set-responseDelaySec').addEventListener('change', guard((e) => {
 }));
 $('#discover-now').addEventListener('click', guard(async () => {
   const res = await api('DISCOVER', { reset: true });
-  toast(res.added ? `Detectados ${res.added} servidor(es) nuevo(s).` : 'Servidores al día.');
+  toast(res.added ? `Detected ${res.added} new server(s).` : 'Servers up to date.');
 }));
 $('#set-maxResultChars').addEventListener('change', guard((e) => {
   const value = Math.min(100000, Math.max(500, Number(e.target.value) || 12000));
   return api('UPDATE_SETTINGS', { settings: { maxResultChars: value } });
 }));
 
-// ───────────────────────── Pestañas y refresco ─────────────────────────
+// ───────────────────────── Tabs and refresh ─────────────────────────
 
 let selectFocusedAt = 0;
 document.addEventListener('focusin', (e) => { if (e.target.matches?.('select')) selectFocusedAt = Date.now(); });
@@ -566,13 +488,12 @@ for (const btn of document.querySelectorAll('.tabs button')) {
 
 let lastSig = '';
 async function refresh(force = false) {
-  // No re-renderizar mientras el usuario escribe en un campo.
   if (!force && document.activeElement?.matches('input[type="text"], input[type="number"]')) return;
-  if (!force && document.activeElement?.matches('select') && Date.now() - selectFocusedAt < 6000) return; // solo unos segundos
+  if (!force && document.activeElement?.matches('select') && Date.now() - selectFocusedAt < 6000) return;
   try {
     const state = await api('GET_STATE');
     latest = state;
-    const sig = JSON.stringify([state.version, state.notices, state.settings, state.bridge,
+    const sig = JSON.stringify([state.version, state.settings, state.bridge,
       state.servers.map((s) => [s.id, s.name, s.url, s.enabled, s.permission, s.status, s.toolCount, s.auto, s.error, s.bridgeStatus, s.bridgeError])]);
     if (force || sig !== lastSig) {
       lastSig = sig;
@@ -580,7 +501,6 @@ async function refresh(force = false) {
       renderServers(state);
       renderGlobalPermission(state.servers);
       renderSettings(state);
-      renderNotices(state);
     }
     if (currentTab === 'history') await renderHistory();
   } catch (err) { toast(err.message); }

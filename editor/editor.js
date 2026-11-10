@@ -1,15 +1,15 @@
 /**
- * editor.js - Editor de servers.json dentro de la extensión (v1.7.0).
+ * editor.js - servers.json editor inside the extension (v1.7.0).
  *
- * Lee y guarda el archivo a través del puente (GET_CONFIG / SAVE_CONFIG en el service worker). El puente valida,
- * deja copia servers.json.bak, escribe de forma atómica y recarga los MCP al instante.
- * Con el puente apagado se puede editar igualmente y descargar el archivo; guardar exige el puente encendido.
+ * Reads and saves the file through the bridge (GET_CONFIG / SAVE_CONFIG in the service worker). The bridge validates,
+ * leaves a servers.json.bak copy, writes atomically, and reloads MCPs instantly.
+ * With the bridge off you can still edit and download; saving requires the bridge on.
  */
 const $ = (selector, root = document) => root.querySelector(selector);
 
-/** Envía un mensaje al service worker. Devuelve siempre la respuesta (ok o no) para poder reaccionar a offline / oldBridge. */
+/** Sends a message to the service worker. Always returns a response (ok or not) so offline / oldBridge can be handled. */
 async function send(type, payload = {}) {
-  try { return (await chrome.runtime.sendMessage({ type, ...payload })) ?? { ok: false, error: 'Sin respuesta de la extensión.' }; } catch (err) { return { ok: false, error: err.message }; }
+  try { return (await chrome.runtime.sendMessage({ type, ...payload })) ?? { ok: false, error: 'No response from the extension.' }; } catch (err) { return { ok: false, error: err.message }; }
 }
 
 function toast(message, ms = 3600) {
@@ -20,11 +20,11 @@ function toast(message, ms = 3600) {
   toast.timer = setTimeout(() => el.classList.remove('show'), ms);
 }
 
-const DEFAULT_TEXT = '{\n  "control_port": 8099,\n  "servers": []\n}\n';
-const RESERVED_PORTS = new Set([8098, 8099]);
+const DEFAULT_TEXT = '{\n  "control_port": 8199,\n  "launcher_port": 8198,\n  "servers": []\n}\n';
+const RESERVED_PORTS = new Set([8198, 8199]);
 const TEMPLATES = [
-  { label: 'Windows Administrator', name: 'windows-administrator', command: "cmd.exe /d /c 'python -m pip show -q windows-server-mcp >nul 2>&1 || python -m pip install -q windows-server-mcp >nul 2>&1 & python -m windows_server_mcp.server'", hint: 'Se instala solo desde PyPI la primera vez (pip install windows-server-mcp)' },
-  { label: 'Memoria', name: 'memoria', command: 'npx -y @modelcontextprotocol/server-memory' },
+  { label: 'Windows Administrator', name: 'windows-administrator', command: "cmd.exe /d /c 'python -m pip show -q windows-server-mcp >nul 2>&1 || python -m pip install -q windows-server-mcp >nul 2>&1 & python -m windows_server_mcp.server'", hint: 'Installs itself from PyPI on first run (pip install windows-server-mcp)' },
+  { label: 'Memory', name: 'memory', command: 'npx -y @modelcontextprotocol/server-memory' },
   { label: 'Fetch (web)', name: 'fetch', command: 'uvx mcp-server-fetch' },
   { label: 'Demo', name: 'demo', command: 'python server/examples/demo_mcp_server.py' },
 ];
@@ -34,9 +34,9 @@ const gutter = $('#gutter');
 const saveBtn = $('#b-save');
 const view = { saved: '', path: '', online: false, bridgeChecked: false, canSave: false, last: null };
 
-// ───────────────────────── Utilidades JSON ─────────────────────────
+// ───────────────────────── JSON helpers ─────────────────────────
 
-/** JSON legible: los arreglos cortos de valores simples (como "command") quedan en una sola línea. */
+/** Readable JSON: short arrays of simple values (like "command") stay on one line. */
 function pretty(value, indent = 0) {
   const pad = '  '.repeat(indent);
   if (Array.isArray(value)) {
@@ -55,7 +55,7 @@ function pretty(value, indent = 0) {
   return JSON.stringify(value);
 }
 
-/** Línea (1-based) de un error de JSON.parse, según lo que informe el navegador. */
+/** Line (1-based) of a JSON.parse error, based on what the browser reports. */
 function errorLine(text, err) {
   const m = /line (\d+) column (\d+)/.exec(err.message);
   if (m) return Number(m[1]);
@@ -64,53 +64,53 @@ function errorLine(text, err) {
   return null;
 }
 
-/** Misma lógica que el puente al arrancar, para avisar antes de guardar. */
+/** Same logic the bridge uses at startup, to warn before saving. */
 function validate(text) {
   const errors = [];
   const warnings = [];
-  if (!text.trim()) return { errors: [{ msg: 'El archivo está vacío.' }], warnings, count: 0, data: null };
+  if (!text.trim()) return { errors: [{ msg: 'The file is empty.' }], warnings, count: 0, data: null };
   let data;
   try { data = JSON.parse(text); } catch (err) {
-    return { errors: [{ msg: `JSON mal escrito: ${err.message.replace(/ in JSON at position \d+.*/, '')}`, line: errorLine(text, err) }], warnings, count: 0, data: null };
+    return { errors: [{ msg: `Malformed JSON: ${err.message.replace(/ in JSON at position \d+.*/, '')}`, line: errorLine(text, err) }], warnings, count: 0, data: null };
   }
   const entries = Array.isArray(data) ? data : (data && typeof data === 'object' ? data.servers : null);
-  if (!Array.isArray(entries)) return { errors: [{ msg: 'Falta la lista "servers": [ ... ]' }], warnings, count: 0, data };
+  if (!Array.isArray(entries)) return { errors: [{ msg: 'Missing the "servers": [ ... ] list' }], warnings, count: 0, data };
   const names = new Set();
   const ports = new Map();
   let count = 0;
   entries.forEach((entry, i) => {
     const n = i + 1;
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) { errors.push({ msg: `El servidor #${n} debe ser un objeto { ... }` }); return; }
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) { errors.push({ msg: `Server #${n} must be an object { ... }` }); return; }
     if (entry.disabled || entry.enabled === false) return;
-    if (typeof entry.name !== 'string' || !entry.name.trim()) { errors.push({ msg: `El servidor #${n} no tiene "name"` }); return; }
+    if (typeof entry.name !== 'string' || !entry.name.trim()) { errors.push({ msg: `Server #${n} has no "name"` }); return; }
     const label = `"${entry.name}"`;
-    if (names.has(entry.name)) errors.push({ msg: `El nombre ${label} está repetido`, name: entry.name });
+    if (names.has(entry.name)) errors.push({ msg: `Name ${label} is duplicated`, name: entry.name });
     names.add(entry.name);
     const cmd = entry.command;
     const okCmd = (typeof cmd === 'string' && cmd.trim()) || (Array.isArray(cmd) && cmd.length && cmd.every((c) => ['string', 'number'].includes(typeof c)));
-    if (!okCmd) errors.push({ msg: `${label}: "command" debe ser una lista no vacía, por ejemplo ["python", "mi_mcp.py"]`, name: entry.name });
+    if (!okCmd) errors.push({ msg: `${label}: "command" must be a non-empty list, e.g. ["python", "my_mcp.py"]`, name: entry.name });
     const port = Number(entry.port);
-    if (entry.port === undefined || entry.port === null || entry.port === '' || !Number.isInteger(port)) errors.push({ msg: `${label}: falta "port" (un número, por ejemplo 8080)`, name: entry.name });
-    else if (port < 1 || port > 65535) errors.push({ msg: `${label}: "port" debe estar entre 1 y 65535`, name: entry.name });
+    if (entry.port === undefined || entry.port === null || entry.port === '' || !Number.isInteger(port)) errors.push({ msg: `${label}: missing "port" (a number, e.g. 8080)`, name: entry.name });
+    else if (port < 1 || port > 65535) errors.push({ msg: `${label}: "port" must be between 1 and 65535`, name: entry.name });
     else {
-      if (ports.has(port)) warnings.push({ msg: `El puerto ${port} lo usan ${label} y "${ports.get(port)}": solo uno podrá abrirse.`, name: entry.name });
+      if (ports.has(port)) warnings.push({ msg: `Port ${port} is used by ${label} and "${ports.get(port)}": only one will be able to open.`, name: entry.name });
       else ports.set(port, entry.name);
-      if (RESERVED_PORTS.has(port)) warnings.push({ msg: `${label}: el puerto ${port} lo usa el puente/lanzador; elige otro.`, name: entry.name });
+      if (RESERVED_PORTS.has(port)) warnings.push({ msg: `${label}: port ${port} is used by the bridge/launcher; pick another.`, name: entry.name });
     }
-    if (entry.env && (typeof entry.env !== 'object' || Array.isArray(entry.env))) errors.push({ msg: `${label}: "env" debe ser un objeto { "VARIABLE": "valor" }`, name: entry.name });
+    if (entry.env && (typeof entry.env !== 'object' || Array.isArray(entry.env))) errors.push({ msg: `${label}: "env" must be an object { "VARIABLE": "value" }`, name: entry.name });
     count += 1;
   });
-  if (!Array.isArray(data) && data.control_port !== undefined && !Number.isInteger(Number(data.control_port))) errors.push({ msg: '"control_port" debe ser un número' });
+  if (!Array.isArray(data) && data.control_port !== undefined && !Number.isInteger(Number(data.control_port))) errors.push({ msg: '"control_port" must be a number' });
   return { errors, warnings, count, data };
 }
 
-/** Línea donde aparece "name": "xxx" (para saltar desde la lista de problemas). */
+/** Line where "name": "xxx" appears (to jump from the issues list). */
 function lineOfName(text, name) {
   const idx = text.indexOf(`"${name}"`);
   return idx < 0 ? null : text.slice(0, idx).split('\n').length;
 }
 
-/** Divide un comando escrito como en una terminal: respeta comillas y no toca las barras de Windows. */
+/** Splits a command typed as in a terminal: respects quotes and leaves Windows backslashes untouched. */
 function splitCommand(input) {
   const out = [];
   let cur = '';
@@ -121,7 +121,7 @@ function splitCommand(input) {
       if (cur || started) { out.push(cur); cur = ''; started = false; }
     } else cur += ch;
   }
-  if (quote) throw new Error('Hay unas comillas sin cerrar en el comando.');
+  if (quote) throw new Error('There are unclosed quotes in the command.');
   if (cur || started) out.push(cur);
   return out;
 }
@@ -132,13 +132,13 @@ function parseEnv(text) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
     const eq = line.indexOf('=');
-    if (eq < 1) throw new Error(`Variable mal escrita: «${line}». Usa CLAVE=valor.`);
+    if (eq < 1) throw new Error(`Malformed variable: "${line}". Use KEY=value.`);
     env[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
   }
   return env;
 }
 
-// ───────────────────────── Estado del editor ─────────────────────────
+// ───────────────────────── Editor state ─────────────────────────
 
 function updateGutter() {
   const lines = editor.value.split('\n').length;
@@ -170,22 +170,22 @@ function renderStatus() {
     const li = document.createElement('li');
     li.className = item.kind;
     const line = item.line ?? (item.name ? lineOfName(text, item.name) : null);
-    li.textContent = line ? `Línea ${line} · ${item.msg}` : item.msg;
+    li.textContent = line ? `Line ${line} · ${item.msg}` : item.msg;
     li.addEventListener('click', () => jumpToLine(line));
     issues.append(li);
   }
   issues.hidden = all.length === 0;
 
-  if (result.errors.length) { status.className = 'status bad'; status.textContent = `✕ ${result.errors.length} error${result.errors.length === 1 ? '' : 'es'}`; } else if (result.warnings.length) {
+  if (result.errors.length) { status.className = 'status bad'; status.textContent = `✕ ${result.errors.length} error${result.errors.length === 1 ? '' : 's'}`; } else if (result.warnings.length) {
     status.className = 'status warn';
-    status.textContent = `⚠ JSON válido · ${result.count} servidor${result.count === 1 ? '' : 'es'} · ${result.warnings.length} aviso${result.warnings.length === 1 ? '' : 's'}`;
-  } else { status.className = 'status ok'; status.textContent = `✓ JSON válido · ${result.count} servidor${result.count === 1 ? '' : 'es'}`; }
+    status.textContent = `⚠ Valid JSON · ${result.count} server${result.count === 1 ? '' : 's'} · ${result.warnings.length} warning${result.warnings.length === 1 ? '' : 's'}`;
+  } else { status.className = 'status ok'; status.textContent = `✓ Valid JSON · ${result.count} server${result.count === 1 ? '' : 's'}`; }
 
   const dirty = text !== view.saved;
-  $('#dirty').textContent = dirty ? '● Sin guardar' : 'Guardado';
+  $('#dirty').textContent = dirty ? '● Unsaved' : 'Saved';
   $('#dirty').classList.toggle('on', dirty);
   saveBtn.disabled = !(dirty && !result.errors.length && view.canSave);
-  saveBtn.title = !view.canSave ? 'Enciende el puente para guardar' : (result.errors.length ? 'Corrige los errores para guardar' : '');
+  saveBtn.title = !view.canSave ? 'Turn on the bridge to save' : (result.errors.length ? 'Fix the errors to save' : '');
 }
 
 function setText(text, { markSaved = false } = {}) {
@@ -197,7 +197,7 @@ function setText(text, { markSaved = false } = {}) {
 
 const isDirty = () => editor.value !== view.saved;
 
-// ───────────────────────── Carga y guardado ─────────────────────────
+// ───────────────────────── Load and save ─────────────────────────
 
 function banner(message, kind = 'warn') {
   const el = $('#banner');
@@ -220,16 +220,16 @@ async function load({ keepDraft = false } = {}) {
     return;
   }
   view.canSave = false;
-  if (res.offline) banner('Puente apagado: puedes editar y descargar. Para guardar, enciéndelo.');
+  if (res.offline) banner('Bridge is off: you can edit and download. To save, turn it on.');
   else if (res.oldBridge) banner(res.error, 'bad');
-  else banner(res.error ?? 'No se pudo leer servers.json.', 'bad');
+  else banner(res.error ?? 'Could not read servers.json.', 'bad');
   if (!editor.value) setText(DEFAULT_TEXT, { markSaved: true });
   renderStatus();
 }
 
 async function save(label = '') {
   const result = validate(editor.value);
-  if (result.errors.length) { toast('Corrige los errores antes de guardar.'); return; }
+  if (result.errors.length) { toast('Fix the errors before saving.'); return; }
   saveBtn.classList.add('busy');
   saveBtn.disabled = true;
   const res = await send('SAVE_CONFIG', { text: editor.value });
@@ -237,11 +237,11 @@ async function save(label = '') {
   if (res.ok) {
     view.saved = editor.value;
     const parts = [];
-    for (const [key, word] of [['started', 'activo(s)'], ['stopped', 'quitado(s)'], ['restarted', 'reiniciado(s)']]) if (Array.isArray(res[key]) && res[key].length) parts.push(`${res[key].length} ${word}`);
-    toast(`${label ? `${label} añadido y guardado` : 'Guardado'} ✓ ${parts.length ? `(${parts.join(', ')})` : ''}`, 4000);
-    if (res.restart_needed) banner('Cambiaste "control_port": reinicia el puente para que use el puerto nuevo.', 'warn');
+    for (const [key, word] of [['started', 'started'], ['stopped', 'stopped'], ['restarted', 'restarted']]) if (Array.isArray(res[key]) && res[key].length) parts.push(`${res[key].length} ${word}`);
+    toast(`${label ? `${label} added and saved` : 'Saved'} ✓ ${parts.length ? `(${parts.join(', ')})` : ''}`, 4000);
+    if (res.restart_needed) banner('You changed "control_port": restart the bridge so it uses the new port.', 'warn');
   } else {
-    toast(res.error ?? 'No se pudo guardar.', 7000);
+    toast(res.error ?? 'Could not save.', 7000);
     if (res.offline || res.oldBridge) { view.canSave = false; await refreshBridge(); }
   }
   renderStatus();
@@ -257,18 +257,18 @@ function download() {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-// ───────────────────────── Añadir / importar MCP ─────────────────────────
+// ───────────────────────── Add / import MCP ─────────────────────────
 
-/** Documento actual como objeto { servers: [...] }; lanza si el JSON no es válido. */
+/** Current document as an object { servers: [...] }; throws if the JSON is invalid. */
 function currentDoc() {
   const text = editor.value.trim();
   if (!text) return { servers: [] };
   let data;
-  try { data = JSON.parse(text); } catch (err) { throw new Error(`El JSON del editor tiene un error (${err.message.replace(/ in JSON at position \d+.*/, '')}). Corrígelo antes de añadir.`); }
+  try { data = JSON.parse(text); } catch (err) { throw new Error(`The editor JSON has an error (${err.message.replace(/ in JSON at position \d+.*/, '')}). Fix it before adding.`); }
   if (Array.isArray(data)) return { servers: data };
-  if (!data || typeof data !== 'object') throw new Error('El JSON del editor debe ser un objeto { "servers": [...] }.');
+  if (!data || typeof data !== 'object') throw new Error('The editor JSON must be an object { "servers": [...] }.');
   if (data.servers === undefined) data.servers = [];
-  if (!Array.isArray(data.servers)) throw new Error('"servers" debe ser una lista.');
+  if (!Array.isArray(data.servers)) throw new Error('"servers" must be a list.');
   return data;
 }
 
@@ -288,10 +288,10 @@ function uniqueName(doc, wanted, taken) {
   return `${wanted}-${n}`;
 }
 
-/** Tras añadir/importar: guarda al instante si se puede (así el MCP aparece sin pasos extra). */
+/** After add/import: saves immediately if possible (so the MCP shows up with no extra steps). */
 async function afterAdd(label) {
   if (view.canSave && !validate(editor.value).errors.length) { await save(label); return; }
-  toast(`${label} añadido. ${view.canSave ? 'Corrige los errores y pulsa Guardar.' : 'Enciende el puente y pulsa Guardar.'}`, 6000);
+  toast(`${label} added. ${view.canSave ? 'Fix the errors and click Save.' : 'Turn on the bridge and click Save.'}`, 6000);
 }
 function addEntries(entries) {
   const doc = currentDoc();
@@ -311,7 +311,7 @@ function addEntries(entries) {
   return addedNames;
 }
 
-/** Convierte lo que el usuario pega (Claude Desktop, Cursor, lista, objeto suelto...) en entradas de servers.json. */
+/** Turns whatever the user pastes (Claude Desktop, Cursor, list, single object...) into servers.json entries. */
 function toEntries(data) {
   let pairs = [];
   if (Array.isArray(data)) pairs = data.map((e) => [e?.name, e]);
@@ -322,13 +322,13 @@ function toEntries(data) {
     else if (data.command !== undefined || data.url !== undefined) pairs = [[data.name, data]];
     else pairs = Object.entries(data).filter(([, v]) => v && typeof v === 'object' && v.command !== undefined);
   }
-  if (!pairs.length) throw new Error('No encontré ningún MCP en ese JSON. Debe traer "mcpServers" o un objeto con "command".');
+  if (!pairs.length) throw new Error('No MCP found in that JSON. It must contain "mcpServers" or an object with "command".');
   return pairs.map(([key, raw], i) => {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`El MCP #${i + 1} no es un objeto.`);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`MCP #${i + 1} is not an object.`);
     const name = String(raw.name ?? key ?? `mcp-${i + 1}`).trim() || `mcp-${i + 1}`;
-    if (raw.command === undefined) throw new Error(`«${name}»: solo se admiten MCP locales que se arrancan con un comando (no URLs remotas).`);
+    if (raw.command === undefined) throw new Error(`"${name}": only local MCPs started with a command are supported (no remote URLs).`);
     let command = typeof raw.command === 'string' ? (Array.isArray(raw.args) ? [raw.command] : splitCommand(raw.command)) : raw.command;
-    if (!Array.isArray(command) || !command.length) throw new Error(`«${name}»: "command" no es válido.`);
+    if (!Array.isArray(command) || !command.length) throw new Error(`"${name}": "command" is not valid.`);
     if (Array.isArray(raw.args)) command = [...command, ...raw.args.map(String)];
     const entry = { name, command };
     if (raw.port !== undefined) entry.port = Number(raw.port);
@@ -350,13 +350,13 @@ $('#f-add').addEventListener('click', async () => {
   try {
     const name = $('#f-name').value.trim();
     const cmdText = $('#f-cmd').value.trim();
-    if (!name) throw new Error('Falta el nombre.');
-    if (!cmdText) throw new Error('Falta el comando.');
+    if (!name) throw new Error('Missing name.');
+    if (!cmdText) throw new Error('Missing command.');
     const entry = { name, command: splitCommand(cmdText) };
     const port = $('#f-port').value.trim();
     if (port) {
       const p = Number(port);
-      if (!Number.isInteger(p) || p < 1 || p > 65535) throw new Error('El puerto debe estar entre 1 y 65535.');
+      if (!Number.isInteger(p) || p < 1 || p > 65535) throw new Error('Port must be between 1 and 65535.');
       entry.port = p;
     }
     const cwd = $('#f-cwd').value.trim();
@@ -364,7 +364,7 @@ $('#f-add').addEventListener('click', async () => {
     const env = parseEnv($('#f-env').value);
     if (Object.keys(env).length) entry.env = env;
     const [added] = addEntries([entry]);
-    await afterAdd(`«${added}»`);
+    await afterAdd(`"${added}"`);
     clearForm();
   } catch (err) { fail('#form-error', err.message); }
 });
@@ -385,9 +385,9 @@ $('#import-btn').addEventListener('click', async () => {
   fail('#import-error', null);
   try {
     const raw = $('#import-text').value.trim();
-    if (!raw) throw new Error('Pega primero el JSON del MCP.');
+    if (!raw) throw new Error('Paste the MCP JSON first.');
     let data;
-    try { data = JSON.parse(raw); } catch (err) { throw new Error(`Ese JSON no es válido: ${err.message.replace(/ in JSON at position \d+.*/, '')}`); }
+    try { data = JSON.parse(raw); } catch (err) { throw new Error(`That JSON is invalid: ${err.message.replace(/ in JSON at position \d+.*/, '')}`); }
     const added = addEntries(toEntries(data));
     await afterAdd(added.join(', '));
     $('#import-text').value = '';
@@ -409,7 +409,7 @@ for (const tpl of TEMPLATES) {
   $('#templates').append(chip);
 }
 
-// ───────────────────────── Puente (estado y botones globales) ─────────────────────────
+// ───────────────────────── Bridge (state and global buttons) ─────────────────────────
 
 async function refreshBridge() {
   const res = await send('GET_STATE');
@@ -419,21 +419,21 @@ async function refreshBridge() {
   view.bridgeChecked = Boolean(b.checked);
   const dot = $('#bridge-dot');
   dot.className = `dot ${!b.checked ? 'connecting' : (b.online ? 'online' : 'offline')}`;
-  $('#bridge-text').textContent = !b.checked ? 'Comprobando…' : (b.online ? `Puente conectado${b.version ? ` v${b.version}` : ''}` : (b.paused ? 'Puente en pausa' : 'Puente apagado'));
+  $('#bridge-text').textContent = !b.checked ? 'Checking…' : (b.online ? `Bridge connected${b.version ? ` v${b.version}` : ''}` : (b.paused ? 'Bridge paused' : 'Bridge off'));
   const toggle = $('#bridge-toggle');
   if (!toggle.classList.contains('busy')) {
-    toggle.querySelector('span').textContent = b.online ? 'Apagar' : 'Iniciar';
+    toggle.querySelector('span').textContent = b.online ? 'Stop' : 'Start';
     toggle.disabled = !b.checked || (!b.online && !b.launcherOnline);
-    toggle.title = (!b.online && !b.launcherOnline) ? 'Necesita el lanzador: se instala una vez con server/install.cmd' : '';
+    toggle.title = (!b.online && !b.launcherOnline) ? 'Requires the launcher: install once with server/install.cmd' : '';
   }
   const restart = $('#bridge-restart');
   if (!restart.classList.contains('busy')) restart.disabled = !b.checked || (!b.online && !b.launcherOnline);
   $('#version').textContent = res.version ? `v${res.version}` : '';
-  $('#version-line').textContent = res.version ? `Web MCP Bridge v${res.version}` : '';
+  $('#version-line').textContent = res.version ? `Web MCP Bridge (Fork) v${res.version}` : '';
 
   const couldSave = view.canSave;
   if (b.online && !couldSave && !isDirty()) await load();
-  else if (b.online && !couldSave) { view.canSave = true; banner(null); renderStatus(); } else if (!b.online && couldSave) { view.canSave = false; banner('El puente se apagó. Enciéndelo para poder guardar.'); renderStatus(); }
+  else if (b.online && !couldSave) { view.canSave = true; banner(null); renderStatus(); } else if (!b.online && couldSave) { view.canSave = false; banner('The bridge went off. Turn it on to be able to save.'); renderStatus(); }
 }
 
 async function bridgeAction(btn, action, busyLabel) {
@@ -445,15 +445,15 @@ async function bridgeAction(btn, action, busyLabel) {
   const res = await send('BRIDGE_GLOBAL', { action });
   btn.classList.remove('busy');
   label.textContent = old;
-  if (!res.ok) toast(res.error ?? 'No se pudo completar la acción.', 7000);
-  else toast(action === 'stop' ? 'Puente apagado.' : (action === 'start' ? 'Puente iniciado ✓' : 'Puente reiniciado ✓'));
+  if (!res.ok) toast(res.error ?? 'Could not complete the action.', 7000);
+  else toast(action === 'stop' ? 'Bridge stopped.' : (action === 'start' ? 'Bridge started ✓' : 'Bridge restarted ✓'));
   await refreshBridge();
   if (action !== 'stop' && res.ok) await load({ keepDraft: true });
 }
-$('#bridge-toggle').addEventListener('click', (e) => bridgeAction(e.currentTarget, view.online ? 'stop' : 'start', view.online ? 'Apagando…' : 'Iniciando…'));
-$('#bridge-restart').addEventListener('click', (e) => bridgeAction(e.currentTarget, 'restart', 'Reiniciando…'));
+$('#bridge-toggle').addEventListener('click', (e) => bridgeAction(e.currentTarget, view.online ? 'stop' : 'start', view.online ? 'Stopping…' : 'Starting…'));
+$('#bridge-restart').addEventListener('click', (e) => bridgeAction(e.currentTarget, 'restart', 'Restarting…'));
 
-// ───────────────────────── Eventos del editor ─────────────────────────
+// ───────────────────────── Editor events ─────────────────────────
 
 editor.addEventListener('input', () => { updateGutter(); renderStatus(); suggestPort(); });
 editor.addEventListener('scroll', () => { gutter.scrollTop = editor.scrollTop; });
@@ -474,12 +474,12 @@ $('#b-format').addEventListener('click', () => {
   try {
     const data = JSON.parse(editor.value);
     setText(`${pretty(data)}\n`);
-  } catch (err) { toast(`No se puede formatear: ${err.message.replace(/ in JSON at position \d+.*/, '')}`); }
+  } catch (err) { toast(`Cannot format: ${err.message.replace(/ in JSON at position \d+.*/, '')}`); }
 });
 $('#b-reload').addEventListener('click', async () => {
-  if (isDirty() && !confirm('Tienes cambios sin guardar. ¿Recargar desde el disco y perderlos?')) return;
+  if (isDirty() && !confirm('You have unsaved changes. Reload from disk and lose them?')) return;
   await load();
-  toast('Recargado desde el disco.');
+  toast('Reloaded from disk.');
 });
 window.addEventListener('beforeunload', (e) => { if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
 

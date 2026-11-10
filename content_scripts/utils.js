@@ -1,6 +1,6 @@
 /**
- * utils.js — Utilidades compartidas por todos los content scripts.
- * Define el espacio de nombres global `WMB` (Web MCP Bridge).
+ * utils.js — Utilities shared by all content scripts.
+ * Defines the global namespace `WMB` (Web MCP Bridge).
  */
 (() => {
   'use strict';
@@ -9,35 +9,33 @@
 
   const nativeSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  /** Mensaje al service worker (nunca lanza excepción). */
+  /** Message to the service worker (never throws). */
   WMB.bg = async (message) => {
     try { return await globalThis.chrome?.runtime?.sendMessage(message); } catch { return null; }
   };
 
-  /** ¿La pestaña está oculta, tapada por otra ventana o sin foco? Ahí Chrome/Brave frenan los temporizadores de la página. */
+  /** Is the tab hidden, covered by another window, or unfocused? Chrome/Brave throttle page timers there. */
   WMB.isBackground = () => typeof document !== 'undefined' && (document.hidden || !document.hasFocus());
 
   /**
-   * Pausa que NO se congela en segundo plano: con la pestaña oculta, el temporizador lo cuenta el service worker
-   * (los setTimeout de una pestaña oculta se frenan a 1 s y, tras 5 min, a 1 por minuto). Si falla, usa setTimeout.
+   * Pause that does NOT freeze in the background: with the tab hidden, the timer is counted by the service worker
+   * (setTimeout in a hidden tab is throttled to 1 s and, after 5 min, to 1 per minute). Falls back to setTimeout.
    */
   WMB.sleep = async (ms) => {
     if (!WMB.isBackground() || !globalThis.chrome?.runtime?.sendMessage) return nativeSleep(ms);
     const started = Date.now();
     await Promise.race([
       WMB.bg({ type: 'SLEEP', ms }),
-      nativeSleep(ms + 3000), // red de seguridad si el service worker no contesta
+      nativeSleep(ms + 3000), // safety net if the service worker does not reply
     ]);
-    // Garantía: una pausa siempre dura (casi) lo pedido. Si el service worker contestó de golpe (extensión recargada,
-    // error…) se completa con setTimeout, para que ningún bucle pueda girar sin freno y colgar la pestaña.
     const left = ms - (Date.now() - started);
     if (left > 20) await nativeSleep(left);
   };
 
-  /** ¿Sigue viva la extensión para este content script? (tras recargarla, el script viejo queda huérfano). */
+  /** Is the extension still alive for this content script? (after reloading, the old script becomes orphaned). */
   WMB.extensionAlive = () => !globalThis.chrome?.runtime || Boolean(globalThis.chrome.runtime.id);
 
-  /** Reintenta `fn` hasta que devuelva un valor «truthy» o venza el timeout. */
+  /** Retries `fn` until it returns a truthy value or the timeout expires. */
   WMB.waitFor = async (fn, { timeout = 3000, interval = 100 } = {}) => {
     const end = Date.now() + timeout;
     while (Date.now() < end) {
@@ -48,7 +46,7 @@
     return fn() || null;
   };
 
-  /** Hash rápido (djb2) para generar IDs de llamadas. */
+  /** Fast hash (djb2) to generate call IDs. */
   WMB.hash = (input) => {
     const text = String(input ?? '');
     let h = 5381;
@@ -56,18 +54,17 @@
     return (h >>> 0).toString(36);
   };
 
-  // ───────────────────────── Selectores flexibles ─────────────────────────
+  // ───────────────────────── Flexible selectors ─────────────────────────
 
   WMB.isVisible = (el) => Boolean(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
 
-  /** Primer elemento VISIBLE que coincida con cualquiera de los selectores (por orden de prioridad). */
+  /** First VISIBLE element matching any of the selectors (in priority order). */
   WMB.firstVisible = (selectors, root = document, { loose = false } = {}) => {
     for (const selector of selectors) {
       try {
         for (const el of root.querySelectorAll(selector)) if (WMB.isVisible(el)) return el;
-      } catch { /* selector inválido: se ignora */ }
+      } catch { /* invalid selector: ignore */ }
     }
-    // Ventana minimizada o tapada: el navegador puede reportar tamaño 0; con `loose` se acepta el primer coincidente.
     if (loose) {
       for (const selector of selectors) {
         try { const el = root.querySelector(selector); if (el) return el; } catch { /* noop */ }
@@ -83,7 +80,7 @@
     return false;
   };
 
-  /** Todos los elementos del PRIMER selector que devuelva resultados. */
+  /** All elements from the FIRST selector that yields results. */
   WMB.allMatches = (selectors, root = document) => {
     for (const selector of selectors) {
       try {
@@ -94,9 +91,9 @@
     return [];
   };
 
-  // ───────────────────────── Parser de llamadas MCP ─────────────────────────
+  // ───────────────────────── MCP call parser ─────────────────────────
 
-  /** Devuelve el índice de la llave que cierra el objeto JSON que empieza en `start`, o -1. */
+  /** Returns the index of the closing brace of the JSON object starting at `start`, or -1. */
   function findBalancedEnd(text, start) {
     let depth = 0;
     let inString = false;
@@ -128,7 +125,7 @@
         const call = JSON.parse(text.slice(start, end + 1))?.mcp_call;
         if (call && typeof call.name === 'string' && call.name) {
           let args = call.arguments;
-          if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } } // algunos modelos serializan los argumentos
+          if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
           calls.push({
             server: typeof call.server === 'string' ? call.server : null,
             name: call.name,
@@ -136,25 +133,24 @@
           });
           from = end + 1;
         }
-      } catch { /* JSON incompleto o inválido */ }
+      } catch { /* incomplete or invalid JSON */ }
     }
     return calls;
   }
 
   /**
-   * Extrae del texto de un mensaje todas las llamadas `{"mcp_call": {...}}` válidas.
-   * Tolera bloques de código, texto alrededor, espacios no estándar y comillas tipográficas.
+   * Extracts all valid `{"mcp_call": {...}}` calls from a message's text.
+   * Tolerates code blocks, surrounding text, non-standard whitespace, and smart quotes.
    * @returns {{server:string|null,name:string,arguments:object}[]}
    */
   WMB.extractMcpCalls = (rawText) => {
     const raw = String(rawText).replace(/[\u00a0\u200b\u2028\u2029]/g, ' ');
     const calls = scanCalls(raw);
     if (calls.length || !raw.includes('mcp_call')) return calls;
-    // Último recurso: algunos renderizadores convierten las comillas rectas en tipográficas (“ ”).
     return scanCalls(raw.replace(/[“”„‟″]/g, '"'));
   };
 
-  // ───────────────────────── Resultados MCP (sin omitir nada) ─────────────────────────
+  // ───────────────────────── MCP results (drop nothing) ─────────────────────────
 
   const EXT = {
     'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'image/svg+xml': 'svg',
@@ -165,11 +161,11 @@
   const sameJson = (a, b) => { try { return JSON.stringify(JSON.parse(a)) === JSON.stringify(b); } catch { return false; } };
 
   /**
-   * Convierte el resultado MCP (`content[]`) en partes de texto + archivos.
-   * Texto, recursos y structuredContent van en línea; imágenes, audio y blobs se adjuntan como archivos.
+   * Converts the MCP result (`content[]`) into text parts + files.
+   * Text, resources and structuredContent stay inline; images, audio and blobs are attached as files.
    * @returns {{parts:(string|{file:object,label:string})[], files:{name:string,mime:string,b64:string,bytes:number}[]}}
    */
-  WMB.parseResult = (result, base = 'resultado') => {
+  WMB.parseResult = (result, base = 'result') => {
     const parts = [];
     const files = [];
     const attach = (data, mime, label) => {
@@ -184,15 +180,15 @@
     let textParts = 0;
     for (const item of result?.content ?? []) {
       if (item.type === 'text') { parts.push(item.text ?? ''); textParts += 1; }
-      else if ((item.type === 'image' || item.type === 'audio') && typeof item.data === 'string') attach(item.data, item.mimeType, item.type === 'image' ? 'imagen' : 'audio');
+      else if ((item.type === 'image' || item.type === 'audio') && typeof item.data === 'string') attach(item.data, item.mimeType, item.type === 'image' ? 'image' : 'audio');
       else if (item.type === 'resource' && item.resource) {
         const { uri = '', text, blob, mimeType } = item.resource;
-        if (typeof text === 'string') parts.push(`[recurso ${uri}]\n${text}`);
-        else if (typeof blob === 'string') attach(blob, mimeType, `recurso ${uri}`.trim());
+        if (typeof text === 'string') parts.push(`[resource ${uri}]\n${text}`);
+        else if (typeof blob === 'string') attach(blob, mimeType, `resource ${uri}`.trim());
         else parts.push(JSON.stringify(item));
       } else if (item.type === 'resource_link') {
-        parts.push(`[enlace: ${[item.uri, item.name, item.description].filter(Boolean).join(' · ')}]`);
-      } else parts.push(JSON.stringify(item)); // tipo desconocido: se conserva tal cual
+        parts.push(`[link: ${[item.uri, item.name, item.description].filter(Boolean).join(' · ')}]`);
+      } else parts.push(JSON.stringify(item));
     }
     const structured = result?.structuredContent;
     if (structured !== undefined && structured !== null) {
@@ -202,23 +198,23 @@
     return { parts, files, hasText: textParts > 0 };
   };
 
-  /** Une las partes en texto; `attached` indica si los archivos llegaron adjuntos al chat. */
+  /** Joins the parts into text; `attached` indicates whether the files were attached to the chat. */
   WMB.renderParts = (parts, attached = true) => parts
     .map((p) => (typeof p === 'string' ? p
-      : attached ? `[${p.label} adjunta a este mensaje: ${p.file.name} (${p.file.mime}, ${kb(p.file.bytes)})]`
-        : `[${p.label} NO adjuntada (el navegador la descargó): ${p.file.name} (${p.file.mime}, ${kb(p.file.bytes)})]`))
+      : attached ? `[${p.label} attached to this message: ${p.file.name} (${p.file.mime}, ${kb(p.file.bytes)})]`
+        : `[${p.label} NOT attached (the browser downloaded it): ${p.file.name} (${p.file.mime}, ${kb(p.file.bytes)})]`))
     .join('\n');
 
-  /** Mensaje que se escribe en el chat con el resultado de la herramienta. */
+  /** Message written into the chat with the tool result. */
   WMB.formatToolResult = ({ server, name, status, text }) => `[MCP_RESULT server="${server}" tool="${name}" status="${status}"]\n${text ?? ''}\n[/MCP_RESULT]`;
 
   const PREVIEW_CHARS = 1500;
 
   /**
-   * Plan de entrega de un resultado MCP SIN pérdida de información:
-   *  - imágenes/audio/blobs → archivos adjuntos;
-   *  - texto que supere `maxChars` → se adjunta COMPLETO como .txt y en línea queda un extracto.
-   * Si el adjunto falla, `build(false)` deja TODO el texto en línea.
+   * Delivery plan for an MCP result with NO information loss:
+   *  - images/audio/blobs → attached files;
+   *  - text above `maxChars` → attached in FULL as a .txt file, and an excerpt stays inline.
+   * If the attach fails, `build(false)` leaves ALL text inline.
    * @returns {{files:object[], build:(attached:boolean)=>string}}
    */
   WMB.planResult = (result, { server, name, status, maxChars = 12000 }) => {
@@ -227,38 +223,33 @@
     const full = WMB.renderParts(parts, true);
     let overflow = null;
     if (full.length > maxChars) {
-      overflow = { name: `${base}_completo.txt`, mime: 'text/plain', text: full, bytes: full.length, overflow: true };
+      overflow = { name: `${base}_full.txt`, mime: 'text/plain', text: full, bytes: full.length, overflow: true };
       files.push(overflow);
     }
     const build = (attached) => {
       let text = WMB.renderParts(parts, attached);
       if (overflow && attached) {
-        text = `${text.slice(0, PREVIEW_CHARS)}\n…\n[resultado de ${full.length} caracteres: contenido COMPLETO en el archivo adjunto ${overflow.name}]`;
+        text = `${text.slice(0, PREVIEW_CHARS)}\n…\n[result of ${full.length} characters: FULL content in the attached file ${overflow.name}]`;
       }
       return WMB.formatToolResult({ server, name, status, text });
     };
     return { files, build };
   };
 
-  // ───────────────────────── Escritura en el cuadro de texto ─────────────────────────
+  // ───────────────────────── Writing to the text box ─────────────────────────
 
   const dom = (WMB.dom = {});
 
   dom.getText = (el) => ('value' in el ? el.value : (el.innerText || el.textContent || ''));
 
-  // ── v1.7.0 · Anti-acumulación ──────────────────────────────────────────────
-  // Causa del bug «la respuesta vieja vuelve al input y se adjunta otra vez»: el resultado se escribía con `append`
-  // sobre lo que hubiera en el cuadro. Si el chat no lo vaciaba tras enviar (DeepSeek/React, pestaña lenta…), el
-  // siguiente resultado se pegaba DESPUÉS del anterior y el contexto crecía en cada vuelta.
-  // Estos bloques los escribe SOLO la extensión; nunca deben sobrevivir en el cuadro de texto.
   const STALE_BLOCK = /\[MCP_RESULT\b[\s\S]*?\[\/MCP_RESULT\]/g;
-  const STALE_LINE = /^[ \t]*\[WMB\][^\n]*$/gm;
-  /** ¿Quedan en el texto restos de resultados/avisos que escribió la extensión? */
-  dom.hasStale = (text) => /\[MCP_RESULT\b|\[\/MCP_RESULT\]|^[ \t]*\[WMB\]/m.test(String(text ?? ''));
-  /** Quita los restos de la extensión y conserva lo que haya escrito el usuario. */
+  const STALE_LINE = /^[ \t]*\[WMBX\][^\n]*$/gm;
+  /** Are there leftovers of results/notices written by the extension in the text? */
+  dom.hasStale = (text) => /\[MCP_RESULT\b|\[\/MCP_RESULT\]|^[ \t]*\[WMBX\]/m.test(String(text ?? ''));
+  /** Strips the extension leftovers and keeps whatever the user typed. */
   dom.stripStale = (text) => String(text ?? '').replace(STALE_BLOCK, '').replace(STALE_LINE, '').replace(/\n{3,}/g, '\n\n').trim();
 
-  /** Construye un `File` a partir de `{name, mime, b64}` o `{name, mime, text}`. */
+  /** Builds a `File` from `{name, mime, b64}` or `{name, mime, text}`. */
   dom.fileFrom = ({ name, mime, b64, text }) => {
     if (b64 === undefined) return new File([text ?? ''], name, { type: mime });
     const bin = atob(b64);
@@ -267,7 +258,7 @@
     return new File([bytes], name, { type: mime });
   };
 
-  /** Descarga un archivo (último recurso cuando no se puede adjuntar al chat: así nada se pierde). */
+  /** Downloads a file (last resort when it cannot be attached to the chat: nothing is lost). */
   dom.download = (file) => {
     const url = URL.createObjectURL(file);
     const link = Object.assign(document.createElement('a'), { href: url, download: file.name });
@@ -278,9 +269,9 @@
   };
 
   /**
-   * Escribe texto en un <textarea> o en un editor contenteditable (ProseMirror, Quill, Lexical…)
-   * de forma que el framework de la página detecte el cambio.
-   * Estrategia: execCommand → evento paste → asignación directa.
+   * Writes text into a <textarea> or a contenteditable editor (ProseMirror, Quill, Lexical…)
+   * so the page framework detects the change.
+   * Strategy: execCommand → paste event → direct assignment.
    */
   dom.setText = async (el, text, { append = true } = {}) => {
     el.focus();
@@ -320,7 +311,7 @@
     await WMB.sleep(50);
     if (dom.getText(el).length > before) return true;
 
-    // Fallback 1: simular un «pegar»
+    // Fallback 1: simulate a "paste"
     try {
       const data = new DataTransfer();
       data.setData('text/plain', text);
@@ -329,13 +320,13 @@
       if (dom.getText(el).length > before) return true;
     } catch { /* noop */ }
 
-    // Fallback 2: asignación directa
+    // Fallback 2: direct assignment
     el.textContent = append && hadText ? `${dom.getText(el)}\n\n${text}` : text;
     el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
     return dom.getText(el).length > before;
   };
 
-  /** Vacía el cuadro de texto avisando al framework de la página. Devuelve true si quedó vacío. */
+  /** Empties the text box notifying the page framework. Returns true if empty. */
   dom.clear = async (el) => {
     el.focus();
     if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
@@ -359,8 +350,8 @@
   };
 
   /**
-   * Quita del cuadro los restos de resultados/avisos de la extensión (los de un envío anterior que no salió)
-   * y conserva lo que haya escrito el usuario. Devuelve true si había algo que limpiar.
+   * Removes extension leftovers from the text box (from a previous send that did not go out)
+   * and preserves whatever the user typed. Returns true if there was something to clean.
    */
   dom.purgeStale = async (el) => {
     const current = dom.getText(el);

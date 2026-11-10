@@ -1,86 +1,87 @@
-# Instalasi Berdampingan dengan Upstream
+# Side-by-Side Installation with Upstream
 
-Dokumen ini menjelaskan cara menjalankan **fork ini** bersama-sama dengan upstream [AstraxOf/web-mcp-bridge](https://github.com/AstraxOf/web-mcp-bridge) di Chrome/Edge/Brave yang sama tanpa saling menimpa.
+This document explains how to run **this fork** alongside the upstream [AstraxOf/web-mcp-bridge](https://github.com/AstraxOf/web-mcp-bridge) in the same Chrome/Edge/Brave without one overwriting the other.
 
-## Ringkasan perbedaan
+## Differences at a glance
 
-| Aspek | Upstream | Fork ini |
+| Aspect | Upstream | This fork |
 |---|---|---|
-| Nama ekstensi | Web MCP Bridge | Web MCP Bridge (Fork) |
-| Namespace storage | `wmb_*` | `wmbx_*` |
-| Port kontrol bridge | 8099 | 8199 |
-| Port launcher | 8098 | 8198 |
-| Port server demo | 8090 | 8190 |
-| Sumber `notices.json` | `AstraxOf/web-mcp-bridge` | `ranggaas6/web-mcp-bridge` |
-| Izin host `raw.githubusercontent.com` | `AstraxOf/*` | `ranggaas6/*` |
+| Extension name | Web MCP Bridge | Web MCP Bridge (Fork) |
+| Storage namespace | `wmb_*` | `wmbx_*` |
+| sessionStorage keys | `wmb:*` | `wmbx:*` |
+| Injection marker | `[WMB:…]` | `[WMBX:…]` |
+| Web Lock | `wmb-alive` | `wmbx-alive` |
+| Bridge control port | 8099 | 8199 |
+| Launcher port | 8098 | 8198 |
+| Demo server port | 8090 | 8190 |
 
-Semua nilai ini didefinisikan di `shared/constants.js` dan `manifest.json`.
+All these values are defined in `shared/constants.js` and `manifest.json`.
 
-## Mengapa port harus berbeda
+## Why the ports must differ
 
-Dua proses bridge Python tidak bisa bind ke port yang sama. Jika upstream memakai 8099, fork memakai 8199. Hal yang sama berlaku untuk port launcher (8098 vs 8198) dan port server demo (8090 vs 8190).
+Two Python bridge processes cannot bind to the same port. If upstream uses 8099, the fork uses 8199. The same applies to the launcher port (8098 vs 8198) and the demo server port (8090 vs 8190).
 
-Jika Anda mengubah port di `servers.json` milik fork, pastikan `DEFAULT_CONTROL_PORT` di `shared/constants.js` dan `controlPort` di `DEFAULT_SETTINGS` ikut disesuaikan, lalu muat ulang ekstensi.
+If you change the port in the fork's `servers.json`, also update `DEFAULT_CONTROL_PORT` in `shared/constants.js` and `controlPort` in `DEFAULT_SETTINGS`, then reload the extension.
 
-## Langkah instalasi berdampingan
+## Side-by-side installation steps
 
-### 1. Clone fork
+### 1. Clone the fork
 
 ```bash
 git clone https://github.com/ranggaas6/web-mcp-bridge ~/web-mcp-bridge-fork
 ```
 
-### 2. Siapkan `servers.json` untuk fork
+### 2. Prepare the fork's `servers.json`
 
 ```bash
 cp ~/web-mcp-bridge-fork/server/servers.example.json \
    ~/web-mcp-bridge-fork/server/servers.json
 ```
 
-Contoh `servers.json` memakai `control_port: 8199`. Jangan ubah ke 8099 jika upstream sedang berjalan.
+The example `servers.json` uses `control_port: 8199`. Do not change it to 8099 while upstream is running.
 
-### 3. Jalankan bridge fork
+### 3. Start the fork bridge
 
 ```bash
 cd ~/web-mcp-bridge-fork
 python server/mcp_ws_bridge.py --config server/servers.json
 ```
 
-Bridge fork mendengarkan di `127.0.0.1:8199`.
+The fork bridge listens on `127.0.0.1:8199`.
 
-### 4. Muat kedua ekstensi di browser
+### 4. Load both extensions in the browser
 
-1. Buka `chrome://extensions` (atau `edge://extensions` / `brave://extensions`).
-2. Aktifkan **Developer mode**.
-3. Klik **Load unpacked** untuk upstream: pilih folder `web-mcp-bridge` asli.
-4. Klik **Load unpacked** lagi untuk fork: pilih `~/web-mcp-bridge-fork`.
+1. Open `chrome://extensions` (or `edge://extensions` / `brave://extensions`).
+2. Enable **Developer mode**.
+3. Click **Load unpacked** for upstream: pick the original `web-mcp-bridge` folder.
+4. Click **Load unpacked** again for the fork: pick `~/web-mcp-bridge-fork`.
 
-Kedua ekstensi akan muncul dengan nama berbeda di daftar: "Web MCP Bridge" dan "Web MCP Bridge (Fork)".
+Both extensions will appear with different names: "Web MCP Bridge" and "Web MCP Bridge (Fork)".
 
-### 5. Set port kontrol di panel masing-masing
+### 5. Set the control port in each panel
 
-- Di popup **Web MCP Bridge** (upstream): biarkan `controlPort` di 8099.
-- Di popup **Web MCP Bridge (Fork)**: pastikan `controlPort` di 8199.
+- In the **Web MCP Bridge** popup (upstream): keep `controlPort` at 8099.
+- In the **Web MCP Bridge (Fork)** popup: make sure `controlPort` is 8199.
 
-Nilai ini tersimpan di `chrome.storage.local` masing-masing ekstensi dengan namespace berbeda (`wmb_` vs `wmbx_`), jadi tidak akan saling menimpa.
+These values are stored in each extension's `chrome.storage.local` under different namespaces (`wmb_` vs `wmbx_`), so they will not overwrite each other.
 
-### 6. Verifikasi
+### 6. Verify
 
-Buka `https://chat.deepseek.com`. Kedua ekstensi akan menyuntikkan widget masing-masing. Karena keduanya memakai adapter yang sama, pastikan Anda hanya mengaktifkan salah satu pada satu waktu lewat popup ekstensi, atau biarkan keduanya aktif jika Anda memang ingin dua jalur tool sekaligus (tidak disarankan karena konteks model akan membengkak).
+Open `https://chat.deepseek.com`. Both extensions will inject their own widget. Because they use the same adapters, make sure you only keep one enabled at a time through each extension's popup, or leave both on if you really want two tool paths at once (not recommended — the model's context grows).
 
-## Yang tidak berubah dari upstream
+## What stays the same as upstream
 
-- Format protokol MCP (`PROTOCOL_VERSION`).
-- Format panggilan `{"mcp_call":{"server":"...","name":"...","arguments":{...}}}`.
-- Skema `servers.json`.
-- Dukungan adapter ChatGPT, Gemini, Claude, dan DeepSeek.
+- MCP protocol format (`PROTOCOL_VERSION`).
+- Call format `{"mcp_call":{"server":"...","name":"...","arguments":{...}}}`.
+- `servers.json` schema.
+- Adapters for ChatGPT, Gemini, Claude, and DeepSeek.
 
-Artinya, server MCP yang sama (`gitrs-mcp`, `mcp-filesystem-server`, atau `gitdesktop-mcp`) bisa dipakai oleh bridge upstream maupun fork, asalkan didaftarkan di kedua `servers.json`.
+So the same MCP servers (`gitrs-mcp`, `mcp-filesystem-server`, or `gitdesktop-mcp`) can be used by both the upstream and the fork bridge as long as they are registered in each `servers.json`.
 
-## Membersihkan
+## Cleanup
 
-- Hapus ekstensi fork dari `chrome://extensions`.
-- Hapus folder clone fork.
-- Port 8199/8198/8190 otomatis bebas ketika proses bridge fork dihentikan.
+- Remove the fork extension from `chrome://extensions`.
+- Delete the fork clone folder.
+- Ports 8199/8198/8190 are freed automatically when the fork bridge process stops.
 
-Tidak ada langkah khusus untuk upstream; ekstensi dan bridge upstream tidak tersentuh.
+Nothing needs to be done for upstream: the upstream extension and bridge are untouched.
