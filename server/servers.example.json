@@ -1,5 +1,6 @@
 {
   "control_port": 8199,
+  "launcher_port": 8198,
   "servers": [
     {
       "name": "demo",
