@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
-install_service.py — Instala el puente MCP para que arranque SOLO al iniciar sesión.
+install_service.py — Install the MCP bridge so it starts ON login by itself.
 
-Un
+Run once. After that you only need the extension: the bridge will already be
+listening in the background.
 
-Después basta con la extensión: el puente ya estará escuchando en segundo plano.
+Other options:
+    python server/install_service.py --purge       # remove auto-starts of OTHER copies of the project (Startup + tasks)
+    python server/install_service.py --uninstall   # remove auto-start
+    python server/install_service.py --dry-run     # show what it would do without touching anything
 
-Otras opciones:
-    python server/install_service.py --purge       # quita los auto-inicios de OTRAS copias del proyecto (Startup + tareas)
-    python server/install_service.py --uninstall   # quita el arranque automático
-    python server/install_service.py --dry-run     # muestra qué haría sin tocar nada
-
-Los servidores MCP que se exponen se definen en `server/servers.json`
-(se crea automáticamente la primera vez; edítalo y vuelve a ejecutar este script).
+The MCP servers exposed here are defined in `server/servers.json`
+(created automatically the first time; edit it and re-run this script).
 """
 from __future__ import annotations
 
@@ -37,24 +36,26 @@ NAME = "WebMCPBridge"
 def default_config() -> dict:
     py = sys.executable
     return {
+        "control_port": 8199,
+        "launcher_port": 8198,
         "servers": [
-            {"name": "astrax-mcp", "port": 8080, "command": [py, "-m", "astrax_mcp"]},
-            {"name": "demo", "port": 8090, "command": [py, str(HERE / "examples" / "demo_mcp_server.py")]},
-        ]
+            {"name": "astrax-mcp", "port": 8180, "command": [py, "-m", "astrax_mcp"], "disabled": True},
+            {"name": "demo", "port": 8190, "command": [py, str(HERE / "examples" / "demo_mcp_server.py")]},
+        ],
     }
 
 
 def ensure_config(dry: bool) -> None:
     if CONFIG.exists():
-        print(f"• Usando configuración existente: {CONFIG}")
+        print(f"* Using existing configuration: {CONFIG}")
         return
-    print(f"• Creando {CONFIG} (edítalo para añadir más servidores)")
+    print(f"* Creating {CONFIG} (edit it to add more servers)")
     if not dry:
         CONFIG.write_text(json.dumps(default_config(), indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def launcher_command(windowless: bool = False) -> list[str]:
-    """Comando del lanzador: es lo que arranca con Windows y mantiene vivo el puente."""
+    """Launcher command: this is what starts with Windows and keeps the bridge alive."""
     py = sys.executable
     if windowless and sys.platform == "win32":
         pyw = Path(py).with_name("pythonw.exe")
@@ -63,16 +64,16 @@ def launcher_command(windowless: bool = False) -> list[str]:
 
 
 def _ports() -> tuple[int, int]:
-    """(puerto de control del puente, puerto del lanzador) segun servers.json."""
+    """(bridge control port, launcher port) from servers.json."""
     try:
         cfg = json.loads(CONFIG.read_text(encoding="utf-8-sig"))
     except Exception:
         cfg = {}
-    return int(cfg.get("control_port", 8099)), int(cfg.get("launcher_port", 8098))
+    return int(cfg.get("control_port", 8199)), int(cfg.get("launcher_port", 8198))
 
 
 def _post(port: int, path: str, timeout: float = 4) -> bool:
-    """POST sin cabecera Origin (la aceptan el puente y el lanzador). True si respondio."""
+    """POST without Origin header (the bridge and launcher accept it). True if it replied."""
     try:
         req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", method="POST", data=b"")
         with urllib.request.urlopen(req, timeout=timeout):
@@ -82,19 +83,19 @@ def _post(port: int, path: str, timeout: float = 4) -> bool:
 
 
 def start_launcher() -> None:
-    """Deja el lanzador corriendo ahora mismo: si ya hay uno le pide reiniciar; si no, lo arranca desacoplado."""
+    """Leave the launcher running now: if one is running, ask it to restart; otherwise start it detached."""
     control, launcher = _ports()
     if _post(launcher, "/restart"):
-        print("-> Lanzador ya activo: puente reiniciado.")
+        print("-> Launcher already running: bridge restarted.")
         return
-    _post(control, "/shutdown")  # un puente suelto (sin lanzador) ocuparia los puertos
+    _post(control, "/shutdown")  # a loose bridge (without launcher) would hold the ports
     time.sleep(1.5)
     flags = 0
     if sys.platform == "win32":
         flags = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
     subprocess.Popen(launcher_command(windowless=True), cwd=str(HERE), creationflags=flags, close_fds=True,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print("-> Lanzador iniciado en segundo plano.")
+    print("-> Launcher started in the background.")
 
 
 def stop_launcher() -> None:
@@ -103,7 +104,7 @@ def stop_launcher() -> None:
     _post(control, "/shutdown")
 
 def restart_bridge() -> int:
-    """Reinicia el puente: apaga el anterior (o un puente viejo que ocupe los puertos) y arranca uno nuevo en segundo plano."""
+    """Restart the bridge: stop the previous one (or an old bridge holding the ports) and start a fresh one in the background."""
     cmd = [sys.executable, str(BRIDGE), "--config", str(CONFIG), "--log-file", str(LOG), "--restart"]
     return subprocess.run(cmd).returncode
 
@@ -118,7 +119,7 @@ def bridge_command(windowless: bool = False) -> list[str]:
 
 # ───────────────────────── Windows ─────────────────────────
 
-TASK_NAME = "WebMCPBridgeLauncher"          # tarea programada propia (reintenta cada minuto si el lanzador muere)
+TASK_NAME = "WebMCPBridgeLauncher"          # own scheduled task (retries every minute if the launcher dies)
 MARKERS = ("start_bridge_loop", "mcp_ws_bridge")
 
 
@@ -127,7 +128,7 @@ def _canon(path) -> str:
 
 
 def _is_here(text: str) -> bool:
-    """El texto (comando, script...) apunta a un archivo de ESTA carpeta."""
+    """The text (command, script...) points to a file in THIS folder."""
     return (_canon(HERE) + "/") in _canon(text)
 
 
@@ -147,8 +148,8 @@ def _ps_quote(value: str) -> str:
 
 
 def purge_foreign_autostarts(dry: bool) -> int:
-    """Windows: quita los auto-inicios del puente que apuntan a OTRAS carpetas (la causa del 'bridge anterior que no muere').
-    Carpeta Inicio: respalda y borra los archivos ajenos. Tareas programadas ajenas: se DESHABILITAN (no se borran). Devuelve cuantos toco."""
+    """Windows: remove bridge auto-starts that point to OTHER folders (the cause of the 'old bridge that never dies').
+    Startup folder: back up and delete foreign files. Foreign scheduled tasks: DISABLE them (do not delete). Returns how many it touched."""
     if sys.platform != "win32":
         return 0
     touched = 0
@@ -169,7 +170,7 @@ def purge_foreign_autostarts(dry: bool) -> int:
             except Exception:
                 continue
             if _has_marker(text) and not _is_here(text):
-                print(f"• Auto-inicio ajeno en Inicio: {item.name} (apunta a otra carpeta) -> respaldo y eliminacion")
+                print(f"* Foreign startup entry: {item.name} (points to another folder) -> backup and delete")
                 touched += 1
                 if not dry:
                     backup.mkdir(exist_ok=True)
@@ -184,21 +185,21 @@ def purge_foreign_autostarts(dry: bool) -> int:
     for task in ([tasks] if isinstance(tasks, dict) else tasks):
         if task.get("Name") == TASK_NAME or _is_here(task.get("Action", "")):
             continue
-        print(f"• Tarea programada ajena: {task.get('Name')} ({task.get('Action', '')[:90]}) -> deshabilitada")
+        print(f"* Foreign scheduled task: {task.get('Name')} ({task.get('Action', '')[:90]}) -> disabled")
         touched += 1
         if not dry and task.get("State") != "Disabled":
             _ps("Disable-ScheduledTask -TaskName %s -TaskPath %s | Out-Null" % (_ps_quote(task["Name"]), _ps_quote(task.get("Path") or "\\")))
     if not touched:
-        print("• No hay auto-inicios de otras copias.")
+        print("* No auto-starts of other copies.")
     return touched
 
 
 def register_task(dry: bool) -> None:
-    """Tarea programada propia: arranca el lanzador al iniciar sesion y lo reintenta cada minuto si muere. Es un seguro extra del .vbs."""
+    """Own scheduled task: starts the launcher on login and retries it every minute if it dies. Extra safety net for the .vbs."""
     if sys.platform != "win32":
         return
     cmd = launcher_command(windowless=True)
-    print(f"• Registrando tarea programada {TASK_NAME} (reintento cada minuto)")
+    print(f"* Registering scheduled task {TASK_NAME} (retry every minute)")
     if dry:
         return
     script = (
@@ -210,7 +211,7 @@ def register_task(dry: bool) -> None:
     ) % (_ps_quote(cmd[0]), _ps_quote('"%s"' % cmd[1]), _ps_quote(str(HERE)), _ps_quote(TASK_NAME))
     code, out = _ps(script)
     if code != 0:
-        print(f"  (no se pudo registrar la tarea: {out[:160]}; el auto-inicio de la carpeta Inicio sigue activo)")
+        print(f"  (could not register the task: {out[:160]}; the Startup folder auto-start still works)")
 
 
 def unregister_task(dry: bool) -> None:
@@ -226,19 +227,19 @@ def install_windows(dry: bool) -> None:
     cmd = " ".join(f'""{part}""' for part in launcher_command(windowless=True))
     script = f'CreateObject("Wscript.Shell").Run "{cmd}", 0, False\n'
     target = windows_startup_file()
-    purge_foreign_autostarts(dry)  # primero se quitan los auto-inicios de otras copias: solo debe quedar UNO
-    print(f"• Registrando arranque automático: {target}")
+    purge_foreign_autostarts(dry)  # first remove auto-starts of other copies: only ONE should remain
+    print(f"* Registering auto-start: {target}")
     if dry:
         register_task(dry)
         return
     target.write_text(script, encoding="utf-8")
     register_task(dry)
-    start_launcher()  # arranca el lanzador ya (o lo reinicia si estaba corriendo); el lanzador levanta el puente
+    start_launcher()  # start the launcher now (or restart it if running); the launcher starts the bridge
 
 
 def uninstall_windows(dry: bool) -> None:
     target = windows_startup_file()
-    print(f"• Eliminando {target}")
+    print(f"* Removing {target}")
     if not dry:
         target.unlink(missing_ok=True)
         unregister_task(dry)
@@ -261,7 +262,7 @@ def install_macos(dry: bool) -> None:
         f"<key>ProgramArguments</key><array>{args}</array>"
         "<key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict></plist>"
     )
-    print(f"• Registrando LaunchAgent: {mac_plist()}")
+    print(f"* Registering LaunchAgent: {mac_plist()}")
     if dry:
         return
     mac_plist().parent.mkdir(parents=True, exist_ok=True)
@@ -271,7 +272,7 @@ def install_macos(dry: bool) -> None:
 
 
 def uninstall_macos(dry: bool) -> None:
-    print(f"• Eliminando {mac_plist()}")
+    print(f"* Removing {mac_plist()}")
     if not dry:
         subprocess.run(["launchctl", "unload", str(mac_plist())], capture_output=True)
         mac_plist().unlink(missing_ok=True)
@@ -290,7 +291,7 @@ def install_linux(dry: bool) -> None:
         f"[Service]\nExecStart={exec_start}\nRestart=always\nRestartSec=3\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
-    print(f"• Registrando servicio systemd de usuario: {linux_unit()}")
+    print(f"* Registering user systemd service: {linux_unit()}")
     if dry:
         return
     linux_unit().parent.mkdir(parents=True, exist_ok=True)
@@ -300,32 +301,32 @@ def install_linux(dry: bool) -> None:
 
 
 def uninstall_linux(dry: bool) -> None:
-    print(f"• Eliminando {linux_unit()}")
+    print(f"* Removing {linux_unit()}")
     if not dry:
         subprocess.run(["systemctl", "--user", "disable", "--now", "web-mcp-bridge.service"], capture_output=True)
         linux_unit().unlink(missing_ok=True)
 
 
-# ───────────────────────── Principal ─────────────────────────
+# ───────────────────────── Main ─────────────────────────
 
 def main() -> int:
-    for stream in (sys.stdout, sys.stderr):  # consolas cp1252: que los simbolos no tumben el script
+    for stream in (sys.stdout, sys.stderr):  # cp1252 consoles: symbols must not crash the script
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
-    parser = argparse.ArgumentParser(description="Instala el puente MCP como servicio de inicio automático.")
-    parser.add_argument("--uninstall", action="store_true", help="Quita el arranque automático")
-    parser.add_argument("--dry-run", action="store_true", help="Muestra los pasos sin ejecutarlos")
-    parser.add_argument("--purge", action="store_true", help="Quita los auto-inicios de OTRAS copias del proyecto (Inicio + tareas programadas) y sale")
-    parser.add_argument("--restart", action="store_true", help="Reinicia el puente ahora (cierra el anterior aunque este ocupando los puertos)")
+    parser = argparse.ArgumentParser(description="Install the MCP bridge as a start-on-login service.")
+    parser.add_argument("--uninstall", action="store_true", help="Remove the auto-start")
+    parser.add_argument("--dry-run", action="store_true", help="Show the steps without running them")
+    parser.add_argument("--purge", action="store_true", help="Remove auto-starts of OTHER copies of the project (Startup + scheduled tasks) and exit")
+    parser.add_argument("--restart", action="store_true", help="Restart the bridge now (closes the previous one even if it holds the ports)")
     args = parser.parse_args()
 
     if args.restart:
         return restart_bridge()
     if args.purge:
         n = purge_foreign_autostarts(args.dry_run)
-        print(f"✔ Listo: {n} auto-inicio(s) ajeno(s) tratado(s).")
+        print(f"OK: {n} foreign auto-start(s) handled.")
         return 0
 
     system = {"win32": "windows", "darwin": "macos"}.get(sys.platform, "linux")
@@ -337,17 +338,17 @@ def main() -> int:
 
     if args.uninstall:
         actions[1](args.dry_run)
-        print("✔ Arranque automático eliminado.")
+        print("OK: auto-start removed.")
         return 0
 
-    print("• Instalando dependencias (websockets)…")
+    print("* Installing dependencies (websockets)...")
     if not args.dry_run:
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", str(HERE / "requirements.txt")], check=True)
     ensure_config(args.dry_run)
     actions[0](args.dry_run)
-    print("\n✔ Listo. El puente corre en segundo plano y arrancará solo con tu sesión.")
+    print("\nOK: done. The bridge runs in the background and will start automatically with your session.")
     print(f"  Logs: {LOG}")
-    print("  Ahora abre el popup de la extensión: debería mostrar los servidores en verde.")
+    print("  Now open the extension popup: it should show the servers in green.")
     return 0
 
 

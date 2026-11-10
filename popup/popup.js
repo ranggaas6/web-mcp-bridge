@@ -11,7 +11,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const STATUS_TEXT = {
   connected: 'Connected', connecting: 'Connecting…', disconnected: 'Disconnected (reconnecting)', error: 'Connection error',
 };
-const DEMO_TOOL = 'info_sistema';
+const DEMO_TOOL = 'system_info';
 
 const ICONS = {
   trash: '<svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>',
@@ -234,7 +234,7 @@ function buildCard(server) {
   test.type = 'button';
   test.className = 'test-btn';
   test.innerHTML = `${ICONS.play}<span>Test</span>`;
-  test.title = 'Runs info_sistema: shows real machine data (enables the demo if needed)';
+  test.title = `Runs ${DEMO_TOOL}: shows real machine data (enables the demo if needed)`;
   test.addEventListener('click', () => runDemo(card));
   tools.append(select, test);
   info.append(name, meta, tools);
@@ -324,7 +324,7 @@ async function runDemo(card) {
     const text = (res.result?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim();
     demoOutputs.set(card.server.id, { ok: !res.result?.isError, text: text || 'The server replied without text.' });
   } catch (err) {
-    const hint = /no existe|not active|not connected/.test(err.message) ? '\nRestart the bridge to load the updated demo.' : '';
+    const hint = /does not exist|not active|not connected|no existe/.test(err.message) ? '\nRestart the bridge to load the updated demo.' : '';
     demoOutputs.set(card.server.id, { ok: false, text: err.message + hint });
   } finally {
     btn.disabled = false;
