@@ -1,6 +1,6 @@
 /**
- * gemini.js — Adaptador para Google Gemini (gemini.google.com).
- * El editor es Quill (`.ql-editor`) dentro del componente <rich-textarea>.
+ * gemini.js — Adapter for Google Gemini (gemini.google.com).
+ * The editor is Quill (`.ql-editor`) inside the <rich-textarea> component.
  */
 (() => {
   'use strict';
@@ -21,9 +21,7 @@
           sendButton: [
             'button.send-button:not(.stop)',
             'button[aria-label*="Send message" i]',
-            'button[aria-label*="Enviar mensaje" i]',
             'button[aria-label*="Send" i]',
-            'button[aria-label*="Enviar" i]',
           ],
           assistantMessages: [
             'model-response message-content',
@@ -34,8 +32,6 @@
           stopButton: [
             'button.send-button.stop',
             'button[aria-label*="Stop" i]',
-            'button[aria-label*="Detener" i]',
-            'button[aria-label*="Parar" i]',
           ],
         },
       });
