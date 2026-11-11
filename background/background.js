@@ -5,11 +5,14 @@
  *   1. Persist configuration (servers, settings, history) in chrome.storage.local.
  *   2. Maintain a WebSocket connection ONLY to enabled MCP servers.
  *   3. Expose a message API to the popup and content scripts (see `handleMessage`).
+ *
+ * Fork addition: per-host enable map. The master switch still works as a kill
+ * switch, but each supported AI host can be toggled independently.
  */
 import { McpConnection } from './ws_client.js';
 import {
   STORAGE_KEYS as KEYS, LEGACY_STORAGE_KEYS, DEFAULT_SETTINGS, MAX_ACTIVE_SERVERS,
-  CALL_TIMEOUT_MS, HISTORY_LIMIT, SUPPORTED_URL_PATTERNS, PERMISSIONS, RESPONSE_DELAY_MAX_MS,
+  CALL_TIMEOUT_MS, HISTORY_LIMIT, SUPPORTED_URL_PATTERNS, SUPPORTED_HOSTS, PERMISSIONS, RESPONSE_DELAY_MAX_MS,
   NOTICES_URL, NOTICES_EVERY_MS, NOTICES_RETRY_MS, NOTICES_MAX_BYTES,
   DEFAULT_CONTROL_PORT, DEFAULT_LAUNCHER_PORT,
 } from '../shared/constants.js';
@@ -32,6 +35,11 @@ async function loadState() {
   const data = await chrome.storage.local.get([KEYS.servers, KEYS.settings]);
   const stored = data[KEYS.settings] ?? {};
   const settings = { ...DEFAULT_SETTINGS, ...stored };
+  settings.hostEnabled = { ...DEFAULT_SETTINGS.hostEnabled, ...(stored.hostEnabled ?? {}) };
+  for (const host of SUPPORTED_HOSTS) {
+    if (!(host in settings.hostEnabled)) settings.hostEnabled[host] = true;
+    settings.hostEnabled[host] = settings.hostEnabled[host] !== false;
+  }
   delete settings.checkUpdates;
   if (!PERMISSIONS.includes(stored.defaultPermission)) settings.defaultPermission = stored.autoExecute ? 'allow' : 'ask';
   const servers = (data[KEYS.servers] ?? []).filter((s) => s.url).map((s) => ({
@@ -57,6 +65,20 @@ function assignSlugs(servers) {
     slugs.set(s.id, slug);
   }
   return slugs;
+}
+
+/**
+ * Extract the host of the tab that sent the message.
+ * Returns null when the sender is not a tab (popup, worker, etc.) — in that case
+ * host checks are skipped, since the popup only aggregates data.
+ */
+function senderHost(sender) {
+  const url = sender?.tab?.url;
+  if (!url) return null;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return SUPPORTED_HOSTS.includes(host) ? host : null;
+  } catch { return null; }
 }
 
 // ───────────────────────── Connections ─────────────────────────
@@ -237,11 +259,17 @@ async function getSnapshot() {
   };
 }
 
-async function getActiveTools() {
+async function getActiveTools(sender) {
   await discoverServers().catch(() => {});
   await reconcile();
   const { servers, settings } = await loadState();
-  if (!settings.bridgeEnabled) return { ok: true, tools: [], disabled: true };
+  if (!settings.bridgeEnabled) return { ok: true, tools: [], disabled: true, reason: 'global' };
+
+  const host = senderHost(sender);
+  if (host && settings.hostEnabled?.[host] === false) {
+    return { ok: true, tools: [], disabled: true, reason: 'host', host };
+  }
+
   const slugs = assignSlugs(servers);
   const active = servers.filter(isUsable);
   await Promise.all(active.map((s) => connections.get(s.id)?.whenReady(4000)));
@@ -269,9 +297,11 @@ async function addHistory(entry) {
   });
 }
 
-async function callTool({ server, name, arguments: args }) {
+async function callTool({ server, name, arguments: args }, sender) {
   const { servers, settings } = await loadState();
   if (!settings.bridgeEnabled) return { ok: false, error: 'The bridge is disabled.' };
+  const host = senderHost(sender);
+  if (host && settings.hostEnabled?.[host] === false) return { ok: false, error: `The bridge is disabled for ${host}.` };
   const slugs = assignSlugs(servers);
   const active = servers.filter((s) => s.enabled && s.url);
   const target = server
@@ -378,7 +408,21 @@ const mutations = {
     if ('responseDelayMs' in clean) {
       clean.responseDelayMs = Math.min(RESPONSE_DELAY_MAX_MS, Math.max(0, Math.round(Number(clean.responseDelayMs)) || 0));
     }
+    if (clean.hostEnabled) {
+      const merged = { ...settings.hostEnabled };
+      for (const [host, value] of Object.entries(clean.hostEnabled)) {
+        if (!SUPPORTED_HOSTS.includes(host)) continue;
+        merged[host] = value !== false;
+      }
+      clean.hostEnabled = merged;
+    }
     await chrome.storage.local.set({ [KEYS.settings]: { ...settings, ...clean } });
+  }),
+
+  UPDATE_HOST_ENABLED: ({ host, enabled }) => mutate(async (_servers, settings) => {
+    if (!SUPPORTED_HOSTS.includes(host)) throw new Error('Unsupported host.');
+    const hostEnabled = { ...settings.hostEnabled, [host]: enabled !== false };
+    await chrome.storage.local.set({ [KEYS.settings]: { ...settings, hostEnabled } });
   }),
 };
 
@@ -695,8 +739,8 @@ async function handleMessage(msg, sender) {
     case 'FOCUS_TAB': return focusTab(sender);
     case 'RESTORE_FOCUS': return restoreFocus(msg);
     case 'GET_STATE': return getSnapshot();
-    case 'GET_ACTIVE_TOOLS': return getActiveTools();
-    case 'CALL_TOOL': return callTool(msg);
+    case 'GET_ACTIVE_TOOLS': return getActiveTools(sender);
+    case 'CALL_TOOL': return callTool(msg, sender);
     case 'DISCOVER':
       if (msg.reset) await chrome.storage.local.remove(KEYS.dismissed);
       return discoverServers(true);
