@@ -29,6 +29,13 @@ export const PERMISSIONS = ['allow', 'ask', 'deny'];
 export const PERMISSION_LABELS = { allow: 'Always allow', ask: 'Always ask', deny: 'Block' };
 
 /**
+ * Default permission for new installs (and for servers without an explicit one).
+ * Per user request: default is "Always allow" so injection works out of the box.
+ * Users can still switch any MCP to "Always ask" or "Block" from the popup/widget.
+ */
+export const DEFAULT_PERMISSION = 'allow';
+
+/**
  * Default control port of the fork.
  * Upstream uses 8099. Fork uses 8199, so both bridges can run simultaneously.
  */
@@ -69,8 +76,11 @@ export const DEFAULT_SETTINGS = {
   },
   /** Automatically add tool instructions when sending the first message. */
   autoInject: true,
-  /** Permission given to new MCP servers (also used by the global selector). */
-  defaultPermission: 'ask',
+  /**
+   * Permission given to new MCP servers (also used by the global selector).
+   * Default is "Always allow" so injection works out of the box.
+   */
+  defaultPermission: DEFAULT_PERMISSION,
   /** Automatically send the result back to the chat. */
   autoSend: true,
   /** Maximum characters of a result kept inline. Anything larger is attached in full as a file (never truncated). */
