@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Web MCP Bridge (Fork)",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Fork of Web MCP Bridge for side-by-side install. Connects ChatGPT, Gemini, Claude, and DeepSeek with local MCP servers over WebSocket on separate ports.",
   "minimum_chrome_version": "116",
   "icons": {
@@ -17,7 +17,7 @@
       "48": "icons/icon48.png"
     }
   },
-  "permissions": ["storage", "alarms", "notifications", "scripting"],
+  "permissions": ["storage", "alarms", "notifications", "scripting", "nativeMessaging"],
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
