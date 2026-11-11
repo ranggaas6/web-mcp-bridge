@@ -53,7 +53,7 @@
     .pill.alert { border-color: var(--warn); }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
     .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
-    .panel { width: 340px; max-height: 70vh; overflow: hidden; display: flex; flex-direction: column; border-radius: 12px; padding: 12px 14px; }
+    .panel { width: 340px; max-height: 70vh; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; border-radius: 12px; padding: 12px 14px; }
     .panel > * { flex: none; }
     .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     .head strong { font-size: 14px; }
