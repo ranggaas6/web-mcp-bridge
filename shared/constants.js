@@ -37,9 +37,36 @@ export const DEFAULT_CONTROL_PORT = 8199;
 /** Launcher port (start_bridge_loop.pyw) of the fork. */
 export const DEFAULT_LAUNCHER_PORT = 8198;
 
+/**
+ * Hosts (AI chat platforms) where the bridge can operate.
+ * Per-host toggles let the user keep, for example, DeepSeek on while Claude stays off.
+ */
+export const SUPPORTED_HOSTS = ['chatgpt.com', 'gemini.google.com', 'claude.ai', 'chat.deepseek.com'];
+
+/** Friendly labels for each supported host (used by the popup and the widget). */
+export const HOST_LABELS = {
+  'chatgpt.com': 'ChatGPT',
+  'gemini.google.com': 'Gemini',
+  'claude.ai': 'Claude',
+  'chat.deepseek.com': 'DeepSeek',
+};
+
+/** Build a fresh all-on host map. */
+export const defaultHostEnabled = () => Object.fromEntries(SUPPORTED_HOSTS.map((h) => [h, true]));
+
 export const DEFAULT_SETTINGS = {
-  /** Master switch: when false there are no connections and no injection. */
+  /** Master switch: when false there are no connections and no injection on ANY host. */
   bridgeEnabled: true,
+  /**
+   * Per-host switch: the bridge only operates in tabs whose hostname is true here.
+   * Keys are hostnames from SUPPORTED_HOSTS. Missing keys default to `true`.
+   */
+  hostEnabled: {
+    'chatgpt.com': true,
+    'gemini.google.com': true,
+    'claude.ai': true,
+    'chat.deepseek.com': true,
+  },
   /** Automatically add tool instructions when sending the first message. */
   autoInject: true,
   /** Permission given to new MCP servers (also used by the global selector). */

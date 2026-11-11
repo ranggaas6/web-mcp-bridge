@@ -177,6 +177,13 @@ select[data-perm="deny"] { border-color: color-mix(in srgb, var(--bad) 55%, var(
 .setting.column input { margin-top: 10px; width: 120px; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2); }
 #tab-settings .foot-row { margin-top: 0; padding: 12px 0; }
 
+/* Per-host list: compact rows under the "Active per AI site" header */
+.host-list { display: grid; gap: 0; margin-top: 4px; }
+.host-list .setting.host-row { padding: 12px 0; }
+.host-list .setting.host-row:first-child { border-top: 1px solid var(--line); }
+.host-list .setting.host-row .txt strong { font-size: 12.5px; }
+.host-list .setting.host-row .txt small { font-size: 11.5px; }
+
 /* Aviso emergente: siempre dentro del popup, con saltos de línea si el texto es largo */
 #toast {
   position: fixed; left: 50%; bottom: 16px; width: max-content; max-width: calc(100% - 2 * var(--pad)); transform: translate(-50%, 12px);

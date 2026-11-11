@@ -4,6 +4,9 @@
  * Shows active MCP status, lets you inject instructions and choose the permission
  * for each MCP (always allow · always ask · block). With "ask" it requests
  * APPROVAL before each tool (human-in-the-loop).
+ *
+ * Fork addition: a per-host switch so each AI site (ChatGPT, Gemini, Claude, DeepSeek)
+ * can be enabled or disabled independently, without touching the other tabs.
  */
 (() => {
   'use strict';
@@ -66,6 +69,14 @@
     .bridge { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
     .bridge .state { display: inline-flex; gap: 6px; align-items: center; }
     .bridge .row button { flex: 1; }
+    .host-toggle { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+    .host-toggle .host-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+    .host-toggle .host-label { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .host-toggle .host-label strong { font-size: 12px; }
+    .host-toggle .host-label small { font-size: 11px; color: var(--muted); }
+    .host-toggle button.host { min-width: 84px; }
+    .host-toggle button.host.on { background: var(--accent); color: var(--accent-fg); border-color: transparent; font-weight: 600; }
+    .host-toggle.off .host-label small { color: var(--warn); }
     .card { margin: 8px 0; padding: 10px; border: 1px solid var(--warn); border-radius: 10px; }
     .card pre {
       margin: 6px 0; padding: 8px; max-height: 140px; overflow: auto; white-space: pre-wrap; word-break: break-word;
@@ -95,7 +106,11 @@
   class Widget {
     constructor(handlers) {
       this.handlers = handlers;
-      this.model = { adapterName: '', servers: [], toolCount: 0, injection: 'none', bridgeEnabled: true, bridge: null, bridgeBusy: null, responseDelayMs: 1500 };
+      this.model = {
+        adapterName: '', servers: [], toolCount: 0, injection: 'none',
+        bridgeEnabled: true, bridge: null, bridgeBusy: null, responseDelayMs: 1500,
+        host: '', hostEnabled: true,
+      };
       this.logs = [];
       this.approvals = [];
       this.open = false;
@@ -242,11 +257,14 @@
       this.host.style.setProperty('display', visible ? '' : 'none', visible ? '' : 'important');
       if (!visible) { this.open = false; }
       if (!force && this.shadow.activeElement?.tagName === 'SELECT' && Date.now() - this.selectFocusedAt < 6000) return;
-      const { servers, toolCount } = this.model;
+      const { servers, toolCount, hostEnabled } = this.model;
       const pending = this.approvals.length;
       const bridgeDown = Boolean(this.model.bridge?.checked && !this.model.bridge.online);
-      const activeLabel = !this.model.bridgeEnabled ? 'Bridge disabled' : bridgeDown ? 'Bridge off' : servers.length
-        ? `${servers.length} MCP · ${toolCount} tools`
+      const hostOff = hostEnabled === false;
+      const activeLabel = !this.model.bridgeEnabled ? 'Bridge disabled'
+        : hostOff ? `${this.model.host || 'This site'} off`
+        : bridgeDown ? 'Bridge off'
+        : servers.length ? `${servers.length} MCP · ${toolCount} tools`
         : 'No active MCPs';
       const allUp = servers.length > 0 && servers.every((s) => s.status === 'connected');
 
@@ -255,7 +273,7 @@
         'aria-expanded': String(this.open),
         onclick: () => { if (this._suppressClickUntil && Date.now() < this._suppressClickUntil) return; this.open = !this.open; this.render(); },
       },
-      h('i', { class: `dot ${pending ? 'warn' : allUp && this.model.bridgeEnabled ? 'ok' : ''}` }),
+      h('i', { class: `dot ${pending ? 'warn' : allUp && this.model.bridgeEnabled && !hostOff ? 'ok' : ''}` }),
       h('span', {}, pending ? `${pending} call${pending > 1 ? 's' : ''} awaiting approval` : activeLabel));
 
       const logScroll = this.root.querySelector('ul.log')?.scrollTop ?? 0;
@@ -293,6 +311,29 @@
       }, steps.map(([ms, text]) => h('option', { value: String(ms), selected: ms === current ? '' : false }, text)));
     }
 
+    /**
+     * Per-host switch.
+     * Turning this off stops injection and tool calls ONLY on the current site.
+     * Other tabs with other AI platforms keep working, and the master switch is untouched.
+     */
+    #hostSection() {
+      const host = this.model.host || location.hostname;
+      const enabled = this.model.hostEnabled !== false;
+      const toggle = () => this.handlers.onToggleHost?.(!enabled);
+      return h('div', { class: `host-toggle${enabled ? '' : ' off'}` },
+        h('div', { class: 'host-row' },
+          h('div', { class: 'host-label' },
+            h('strong', {}, `Bridge on ${host}`),
+            h('small', {}, enabled ? 'Injection and tools are active on this site.' : 'Injection and tools are OFF only on this site.')),
+          h('button', {
+            class: `host${enabled ? ' on' : ''}`,
+            onclick: toggle,
+            title: enabled
+              ? 'Disable the bridge only on this site (other AI tabs are not affected)'
+              : 'Enable the bridge only on this site',
+          }, enabled ? 'Enabled' : 'Disabled')));
+    }
+
     /** Global bridge control: start / stop / restart the PROCESS. */
     #bridgeSection() {
       const { bridge, bridgeBusy } = this.model;
@@ -303,7 +344,7 @@
       const act = (action) => () => { if (!busy) this.handlers.onBridgeAction?.(action); };
       return h('div', { class: 'bridge' },
         h('div', { class: 'perm', style: 'margin-top:0' },
-          h('strong', {}, 'Bridge'),
+          h('strong', {}, 'Bridge (all sites)'),
           h('span', { class: 'muted state' }, h('i', { class: `dot ${online ? 'ok' : ''}` }), stateText)),
         h('div', { class: 'row' },
           online
@@ -329,6 +370,8 @@
           h('button', { 'aria-label': 'Close', onclick: () => { this.open = false; this.render(true); } }, '✕')),
 
         this.#approvalSection(),
+
+        this.#hostSection(),
 
         servers.length
           ? h('ul', {}, servers.map((s) => h('li', { class: 'srv' },

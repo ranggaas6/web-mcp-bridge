@@ -4,8 +4,11 @@
  * MCP servers are defined in server/servers.json (auto-detected): here they are only enabled,
  * granted permissions, and tested. From this panel the file can be opened and the bridge restarted.
  * Cards are reused between refreshes (never recreated), so transitions animate instead of jumping.
+ *
+ * Fork addition: per-host toggles in Settings. Each supported AI site can be enabled or
+ * disabled independently, so a user can keep DeepSeek on while Claude stays off.
  */
-import { MAX_ACTIVE_SERVERS, RECOMMENDED_ACTIVE_SERVERS, PERMISSIONS, PERMISSION_LABELS, DEMO_SERVER } from '../shared/constants.js';
+import { MAX_ACTIVE_SERVERS, RECOMMENDED_ACTIVE_SERVERS, PERMISSIONS, PERMISSION_LABELS, DEMO_SERVER, SUPPORTED_HOSTS, HOST_LABELS } from '../shared/constants.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const STATUS_TEXT = {
@@ -383,6 +386,53 @@ function renderGlobalPermission(servers) {
 }
 $('#perm-all').addEventListener('change', guard((e) => api('SET_ALL_PERMISSIONS', { permission: e.target.value })));
 
+// ───────────────────────── Per-host toggles ─────────────────────────
+
+const hostRows = new Map();
+
+function buildHostRow(host) {
+  const row = document.createElement('label');
+  row.className = 'setting host-row';
+  const sw = document.createElement('span');
+  sw.className = 'switch';
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.addEventListener('change', guard(() => api('UPDATE_HOST_ENABLED', { host, enabled: checkbox.checked })));
+  sw.append(checkbox, document.createElement('span'));
+
+  const txt = document.createElement('span');
+  txt.className = 'txt';
+  const strong = document.createElement('strong');
+  strong.textContent = `${HOST_LABELS[host] ?? host} (${host})`;
+  const small = document.createElement('small');
+  small.textContent = '';
+  txt.append(strong, small);
+
+  row.append(sw, txt);
+  return { row, checkbox, small };
+}
+
+function renderHosts(state) {
+  const list = $('#host-list');
+  if (!list) return;
+  const hostEnabled = state.settings?.hostEnabled ?? {};
+  for (const host of SUPPORTED_HOSTS) {
+    let entry = hostRows.get(host);
+    if (!entry) {
+      entry = buildHostRow(host);
+      hostRows.set(host, entry);
+      list.append(entry.row);
+    }
+    const on = hostEnabled[host] !== false;
+    if (document.activeElement !== entry.checkbox) entry.checkbox.checked = on;
+    entry.checkbox.setAttribute('aria-label', `Enable bridge on ${host}`);
+    entry.checkbox.disabled = state.settings?.bridgeEnabled === false;
+    entry.small.textContent = on
+      ? 'Injection and tools are active on this site.'
+      : 'Injection and tools are OFF only on this site. Other sites are not affected.';
+  }
+}
+
 // ───────────────────────── Notices ─────────────────────────
 
 const LEVEL_TEXT = { info: 'News', update: 'New version', warning: 'Important' };
@@ -502,6 +552,8 @@ function renderSettings(state) {
   $('#set-showNotices').checked = settings.showNotices !== false;
   if (document.activeElement?.id !== 'set-reinjectEvery') $('#set-reinjectEvery').value = settings.reinjectEvery;
   if (document.activeElement?.id !== 'set-responseDelaySec') $('#set-responseDelaySec').value = (settings.responseDelayMs ?? 1500) / 1000;
+
+  renderHosts(state);
 
   $('#version').textContent = state.version ? `v${state.version}` : '';
   $('#version-line').textContent = state.version ? `Web MCP Bridge (Fork) v${state.version}` : '';
