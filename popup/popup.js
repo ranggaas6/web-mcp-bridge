@@ -5,10 +5,11 @@
  * granted permissions, and tested. From this panel the file can be opened and the bridge restarted.
  * Cards are reused between refreshes (never recreated), so transitions animate instead of jumping.
  *
- * Fork addition: per-host toggles in Settings. Each supported AI site can be enabled or
- * disabled independently, so a user can keep DeepSeek on while Claude stays off.
+ * Fork additions:
+ *   - Per-host toggles in Settings: each AI site can be enabled or disabled independently.
+ *   - Default permission for new MCPs is "Always allow" so injection works out of the box.
  */
-import { MAX_ACTIVE_SERVERS, RECOMMENDED_ACTIVE_SERVERS, PERMISSIONS, PERMISSION_LABELS, DEMO_SERVER, SUPPORTED_HOSTS, HOST_LABELS } from '../shared/constants.js';
+import { MAX_ACTIVE_SERVERS, RECOMMENDED_ACTIVE_SERVERS, PERMISSIONS, PERMISSION_LABELS, DEFAULT_PERMISSION, DEMO_SERVER, SUPPORTED_HOSTS, HOST_LABELS } from '../shared/constants.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const STATUS_TEXT = {
@@ -373,7 +374,8 @@ function renderServers(state) {
 function renderGlobalPermission(servers) {
   const select = $('#perm-all');
   const perms = new Set(servers.map((s) => s.permission));
-  const value = perms.size === 1 ? [...perms][0] : (perms.size === 0 ? 'ask' : 'mixed');
+  // Fallback when there are no servers yet must match the default ("Always allow").
+  const value = perms.size === 1 ? [...perms][0] : (perms.size === 0 ? DEFAULT_PERMISSION : 'mixed');
   select.value = value;
   select.dataset.perm = value;
   $('#perm-all').closest('.perm-all').hidden = servers.length === 0;
