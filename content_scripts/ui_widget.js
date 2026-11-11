@@ -8,7 +8,8 @@
  * Fork addition: a per-host switch so each AI site (ChatGPT, Gemini, Claude, DeepSeek)
  * can be enabled or disabled independently, without touching the other tabs.
  *
- * Fork addition: tabs to separate the main settings from the log view.
+ * Fork addition: tabs to separate the main settings from the log view, with
+ * dedicated log actions (copy, clear, export).
  */
 (() => {
   'use strict';
@@ -55,16 +56,17 @@
     .pill.alert { border-color: var(--warn); }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
     .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
-    .panel { width: 340px; max-height: 80vh; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; border-radius: 12px; padding: 12px 14px; }
-    .panel > * { flex: none; }
-    .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .panel { width: 340px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; border-radius: 12px; padding: 12px 0 0 0; }
+    .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding: 0 14px; }
     .head strong { font-size: 14px; }
-    .tabs { display: flex; gap: 4px; margin-bottom: 8px; flex: none; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 8px; flex: none; padding: 0 14px; }
     .tab-btn { flex: 1; text-align: center; padding: 6px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; font-weight: 500; }
     .tab-btn:hover { background: rgba(127,127,127,.1); }
-    .tab-btn.active { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
-    .log-view { display: flex; flex-direction: column; flex: 1; min-height: 250px; overflow: hidden; }
-    .log-view ul { flex: 1; overflow-y: auto; margin: 0; padding: 0; border: none; }
+    .tab-btn.active { background: rgba(127,127,127,.2); color: var(--fg); font-weight: 600; border-color: var(--line); }
+    .tab-content { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 0 14px 12px; }
+    .log-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; padding: 0 14px 12px; }
+    .log-view ul { flex: 1; overflow-y: auto; margin: 0; padding: 0; border: none; display: flex; flex-direction: column; gap: 2px; padding-right: 4px; }
+    .log-view li { font-size: 12px; color: var(--muted); line-height: 1.3; padding-bottom: 4px; border-bottom: 1px solid rgba(127,127,127,.1); word-break: break-word; }
     .muted { color: var(--muted); font-size: 12px; }
     ul { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; }
     li.srv { display: flex; gap: 8px; align-items: center; }
@@ -280,9 +282,9 @@
       h('i', { class: `dot ${pending ? 'warn' : allUp && this.model.bridgeEnabled && !hostOff ? 'ok' : ''}` }),
       h('span', {}, pending ? `${pending} call${pending > 1 ? 's' : ''} awaiting approval` : activeLabel));
 
-      const logScroll = this.root.querySelector('ul.log')?.scrollTop ?? 0;
+      const logScroll = this.root.querySelector('.log-view ul')?.scrollTop ?? 0;
       this.root.replaceChildren(...(this.open ? [this.#panel()] : []), pill);
-      const logList = this.root.querySelector('ul.log');
+      const logList = this.root.querySelector('.log-view ul');
       if (logList && logScroll) logList.scrollTop = logScroll;
       if (this.open) requestAnimationFrame(() => this.#fitToViewport());
     }
@@ -359,7 +361,37 @@
     }
 
     #logSection() {
+      const logText = this.logs.map(l => `[${l.ts.toLocaleTimeString('en')}] [${l.kind}] ${l.text}`).join('\n');
+      const exportLogs = () => {
+        const blob = new Blob([logText], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `wmb-logs-${(this.model.adapterName || 'unknown').toLowerCase()}-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+      const copyLogs = () => {
+        navigator.clipboard.writeText(logText).then(() => {
+          this.log('ok', 'Logs copied to clipboard.');
+        }).catch(() => {
+          this.log('err', 'Failed to copy logs.');
+        });
+      };
+      const clearLogs = () => {
+        this.logs = [];
+        this.render(true);
+      };
+
       return h('div', { class: 'log-view' },
+        h('div', { class: 'row', style: 'margin-bottom: 8px; margin-top: 0; justify-content: space-between; align-items: center;' },
+          h('strong', { style: 'font-size: 12px;' }, `Logs for ${this.model.adapterName || 'Unknown'}`),
+          h('div', { style: 'display: flex; gap: 4px;' },
+            h('button', { style: 'font-size: 11px; padding: 4px 8px;', onclick: copyLogs }, 'Copy'),
+            h('button', { style: 'font-size: 11px; padding: 4px 8px;', onclick: exportLogs }, 'Export'),
+            h('button', { style: 'font-size: 11px; padding: 4px 8px; color: var(--err);', onclick: clearLogs }, 'Clear')
+          )
+        ),
         this.logs.length
           ? h('ul', { class: 'log' }, this.logs.map((l) => h('li', { class: l.kind },
               `${l.ts.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · ${l.text}`)))
@@ -409,7 +441,7 @@
           h('button', { class: `tab-btn${this.activeTab === 'logs' ? ' active' : ''}`, onclick: () => { this.activeTab = 'logs'; this.render(true); } }, 'Logs')
         ),
 
-        this.activeTab === 'logs' ? this.#logSection() : mainContent
+        this.activeTab === 'logs' ? this.#logSection() : h('div', { class: 'tab-content' }, ...mainContent)
       );
     }
 
