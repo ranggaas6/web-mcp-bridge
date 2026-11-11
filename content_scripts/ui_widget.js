@@ -7,6 +7,8 @@
  *
  * Fork addition: a per-host switch so each AI site (ChatGPT, Gemini, Claude, DeepSeek)
  * can be enabled or disabled independently, without touching the other tabs.
+ *
+ * Fork addition: tabs to separate the main settings from the log view.
  */
 (() => {
   'use strict';
@@ -49,14 +51,20 @@
     .wrap.flip { flex-direction: column-reverse; }
     .wrap.flip .panel { margin-bottom: 4px; }
     @media (prefers-reduced-motion: reduce) { .wrap:not(.dragging) { transition: none; } }
-    .panel { max-width: calc(100vw - 24px); max-height: min(70vh, calc(100vh - 40px)); }
+    .panel { max-width: calc(100vw - 24px); max-height: min(80vh, calc(100vh - 40px)); }
     .pill.alert { border-color: var(--warn); }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
     .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
-    .panel { width: 340px; max-height: 70vh; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; border-radius: 12px; padding: 12px 14px; }
+    .panel { width: 340px; max-height: 80vh; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; border-radius: 12px; padding: 12px 14px; }
     .panel > * { flex: none; }
     .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     .head strong { font-size: 14px; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 8px; flex: none; }
+    .tab-btn { flex: 1; text-align: center; padding: 6px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; font-weight: 500; }
+    .tab-btn:hover { background: rgba(127,127,127,.1); }
+    .tab-btn.active { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+    .log-view { display: flex; flex-direction: column; flex: 1; min-height: 250px; overflow: hidden; }
+    .log-view ul { flex: 1; overflow-y: auto; margin: 0; padding: 0; border: none; }
     .muted { color: var(--muted); font-size: 12px; }
     ul { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; }
     li.srv { display: flex; gap: 8px; align-items: center; }
@@ -82,11 +90,6 @@
       margin: 6px 0; padding: 8px; max-height: 140px; overflow: auto; white-space: pre-wrap; word-break: break-word;
       background: rgba(127,127,127,.12); border-radius: 6px; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace;
     }
-    .panel > ul.log { flex: 0 1 auto; min-height: 56px; max-height: 210px; overflow-y: auto; overscroll-behavior: contain; padding-right: 6px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
-    ul.log::-webkit-scrollbar { width: 5px; }
-    ul.log::-webkit-scrollbar-track { background: transparent; }
-    ul.log::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
-    ul.log::-webkit-scrollbar-thumb:hover { background: var(--muted); }
     .approvals { flex: none; }
     .approvals .card { margin: 0 0 8px; }
     .panel.has-approval .card pre { max-height: 96px; }
@@ -114,6 +117,7 @@
       this.logs = [];
       this.approvals = [];
       this.open = false;
+      this.activeTab = 'main';
       this.selectFocusedAt = 0;
 
       this.host = document.createElement('div');
@@ -354,6 +358,15 @@
         h('div', { class: 'perm' }, h('strong', {}, 'Response delay'), this.#delaySelect()));
     }
 
+    #logSection() {
+      return h('div', { class: 'log-view' },
+        this.logs.length
+          ? h('ul', { class: 'log' }, this.logs.map((l) => h('li', { class: l.kind },
+              `${l.ts.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · ${l.text}`)))
+          : h('p', { class: 'muted' }, 'No logs yet.')
+      );
+    }
+
     #panel() {
       const { servers, injection, adapterName } = this.model;
       const injectionText = {
@@ -364,41 +377,40 @@
       const perms = new Set(servers.map((s) => s.permission));
       const common = perms.size === 1 ? [...perms][0] : 'mixed';
 
-      return h('div', { class: `panel${this.approvals.length ? ' has-approval' : ''}`, role: 'dialog', 'aria-label': 'Web MCP Bridge' },
-        h('div', { class: 'head', 'data-drag': '1', style: 'cursor: move;' },
-          h('strong', {}, `Web MCP Bridge · ${adapterName}`),
-          h('button', { 'aria-label': 'Close', onclick: () => { this.open = false; this.render(true); } }, '✕')),
-
+      const mainContent = [
         this.#approvalSection(),
-
         this.#hostSection(),
-
         servers.length
           ? h('ul', {}, servers.map((s) => h('li', { class: 'srv' },
             h('i', { class: `dot ${s.status === 'connected' ? 'ok' : s.status === 'connecting' ? 'warn' : ''}` }),
             h('span', { class: 'grow' }, s.name, h('span', { class: 'muted' }, s.permission === 'deny' ? ' · blocked' : s.status === 'connected' ? ` · ${s.toolCount} tools` : ' · disconnected')),
             this.#permSelect(s.permission, (value) => this.handlers.onSetPermission(s.id, value), `Permission for ${s.name}`))))
           : h('p', { class: 'muted' }, 'Open the extension icon and enable an MCP server.'),
-
         servers.length > 1
           ? h('div', { class: 'perm' }, h('strong', {}, 'All MCPs'),
             this.#permSelect(common, (value) => this.handlers.onSetPermission(null, value), 'Permission for all MCPs'))
           : null,
-
         this.#bridgeSection(),
-
         h('p', { class: 'muted' }, injectionText),
         h('div', { class: 'row' },
           h('button', { class: 'primary', onclick: () => this.handlers.onInject() }, 'Inject instructions'),
           h('button', { onclick: () => this.handlers.onRefresh() }, 'Refresh'),
           h('button', { title: 'Re-reads the last AI response (if the tab was slow and missed it)', onclick: () => this.handlers.onRescan?.() }, 'Rescan')),
+        h('div', { class: 'foot' }, h('div', {}, `Web MCP Bridge (Fork) v${WMB.VERSION}`), h('div', {}, 'GitHub: @ranggaas6/web-mcp-bridge'))
+      ];
 
-        this.logs.length
-          ? h('ul', { class: 'log' }, this.logs.map((l) => h('li', { class: l.kind },
-            `${l.ts.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · ${l.text}`)))
-          : null,
+      return h('div', { class: `panel${this.approvals.length ? ' has-approval' : ''}`, role: 'dialog', 'aria-label': 'Web MCP Bridge' },
+        h('div', { class: 'head', 'data-drag': '1', style: 'cursor: move;' },
+          h('strong', {}, `Web MCP Bridge · ${adapterName}`),
+          h('button', { 'aria-label': 'Close', onclick: () => { this.open = false; this.render(true); } }, '✕')),
 
-        h('div', { class: 'foot' }, h('div', {}, `Web MCP Bridge (Fork) v${WMB.VERSION}`), h('div', {}, 'GitHub: @ranggaas6/web-mcp-bridge')));
+        h('div', { class: 'tabs' },
+          h('button', { class: `tab-btn${this.activeTab === 'main' ? ' active' : ''}`, onclick: () => { this.activeTab = 'main'; this.render(true); } }, 'Main'),
+          h('button', { class: `tab-btn${this.activeTab === 'logs' ? ' active' : ''}`, onclick: () => { this.activeTab = 'logs'; this.render(true); } }, 'Logs')
+        ),
+
+        this.activeTab === 'logs' ? this.#logSection() : mainContent
+      );
     }
 
     /** Approval always at the top (below header) so its buttons never fall out of the panel. */
