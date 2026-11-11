@@ -3,6 +3,11 @@
  *
  * Fork: namespace `wmbx` en sessionStorage, marca de inyección y Web Lock
  * para convivir con la extensión original en la misma pestaña.
+ *
+ * Fork addition: per-host toggle. Each tab only injects/calls tools when
+ * `settings.bridgeEnabled` is true AND `settings.hostEnabled[location.hostname]`
+ * is not false. The widget shows a small switch so the user can flip the
+ * current host without opening the popup.
  */
 (() => {
   'use strict';
@@ -19,10 +24,18 @@
   const DELIVER_TIMEOUT_MS = 120_000;
   const DENIAL = /no tengo acceso|no puedo acceder|no tengo (la )?capacidad de (acceder|ejecutar|controlar)|no puedo (ejecutar|controlar|ver tu|abrir)|no dispongo de (acceso|herramientas)|no tengo herramientas|i (don'?t|do not) have (access|tools)|i (can'?t|cannot|am unable to) (access|control|run|execute|see your)/i;
 
+  const HOST = location.hostname.toLowerCase();
+
   const slugKey = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const guarded = (promise, ms, message) => Promise.race([promise, WMB.sleep(ms).then(() => { throw new Error(message); })]);
 
-  const state = { servers: [], tools: [], settings: { autoSend: true, maxResultChars: 12000 }, forceFull: false };
+  const state = {
+    servers: [],
+    tools: [],
+    settings: { autoSend: true, maxResultChars: 12000 },
+    hostEnabled: true,
+    forceFull: false,
+  };
   let queue = Promise.resolve();
   let lastRefreshError = '';
 
@@ -36,12 +49,19 @@
     }
   }
 
+  const isActive = () => state.settings.bridgeEnabled !== false && state.hostEnabled !== false;
+
   const widget = new WMB.Widget({
     onInject: () => injectInstructions(),
     onRefresh: () => { adapter.rescan(); return refresh(true); },
     onToggleBridge: async (value) => {
       await send({ type: 'UPDATE_SETTINGS', settings: { bridgeEnabled: value } });
       await refresh();
+    },
+    onToggleHost: async (value) => {
+      await send({ type: 'UPDATE_HOST_ENABLED', host: HOST, enabled: value });
+      await refresh();
+      widget.log('ok', value ? `Bridge habilitado en ${HOST}.` : `Bridge deshabilitado SOLO en ${HOST}. Otras pestañas no se ven afectadas.`);
     },
     onBridgeAction: async (action) => {
       const labels = { start: 'Encendiendo', stop: 'Apagando', restart: 'Reiniciando' };
@@ -81,12 +101,15 @@
     }
     lastRefreshError = '';
     state.settings = snapshot.settings;
+    state.hostEnabled = snapshot.settings?.hostEnabled?.[HOST] !== false;
     state.servers = snapshot.servers.filter((s) => s.enabled && s.url);
     state.tools = active.tools;
     WMB.tools = state.tools;
     adapter.configure({ focusFallback: state.settings.focusFallback !== false });
     widget.update({
       adapterName: adapter.name,
+      host: HOST,
+      hostEnabled: state.hostEnabled,
       servers: state.servers,
       toolCount: state.tools.length,
       bridgeEnabled: state.settings.bridgeEnabled,
@@ -101,8 +124,10 @@
 
   async function injectInstructions() {
     await refresh();
-    if (!state.settings.bridgeEnabled) {
-      widget.log('err', 'El bridge está desactivado. Actívalo primero.');
+    if (!isActive()) {
+      widget.log('err', state.settings.bridgeEnabled === false
+        ? 'El bridge está desactivado (interruptor general). Actívalo primero.'
+        : `El bridge está desactivado SOLO en ${HOST}. Actívalo en el panel de esta plataforma.`);
       return;
     }
     if (!state.tools.length) {
@@ -181,7 +206,7 @@
     if (detected.malformed) return handleMalformed(detected);
     badStreak = 0;
     const { call } = detected;
-    if (!state.settings.bridgeEnabled) return;
+    if (!isActive()) return;
     const obsolete = () => detected.seq !== undefined && detected.seq !== callSeq;
     if (obsolete()) { widget.log('err', `Llamada obsoleta descartada (${call.name}): ya hay algo mas nuevo en el chat.`); return; }
     const { srv, tool } = await resolveCall(call);
@@ -256,7 +281,7 @@
   async function waitForReaction(ms, mine) {
     const end = Date.now() + ms;
     while (Date.now() < end) {
-      if (mine !== epoch || !state.settings.bridgeEnabled) return 'cancelled';
+      if (mine !== epoch || !isActive()) return 'cancelled';
       if (adapter.hasReacted()) return 'replied';
       await WMB.sleep(1000);
     }
@@ -279,7 +304,7 @@
       sent = (await adapter.sendToolResult(message, { autoSend: true, settleMs: 0 })).ok;
     }
     if (sent && (await waitForReaction(REACT_WAIT_MS, mine)) !== 'timeout') return;
-    if (mine !== epoch || !state.settings.bridgeEnabled) return;
+    if (mine !== epoch || !isActive()) return;
     const reruns = detected.reruns ?? 0;
     if (reruns >= MAX_RERUNS) {
       widget.log('err', 'Sigo sin respuesta de la IA tras reenviar y volver a ejecutar. Revisa el chat.');
@@ -294,7 +319,7 @@
   const CONN_ERR = /no est.{1,2} conectado|desconectado/i;
 
   async function handleMalformed({ text }) {
-    if (!state.settings.bridgeEnabled || !state.tools.length) return;
+    if (!isActive() || !state.tools.length) return;
     badStreak += 1;
     if (badStreak > MAX_BAD_STREAK) {
       widget.log('err', 'La IA repite un formato invalido: dejo de avisarle. Revisa el chat.');
@@ -354,7 +379,7 @@
     callSeq += 1;
     recentCalls.clear();
     const { bridgeEnabled, autoInject, reminder, reinjectEvery } = state.settings;
-    if (!bridgeEnabled || !state.tools.length) return;
+    if (!bridgeEnabled || state.hostEnabled === false || !state.tools.length) return;
 
     const present = hasInstructions();
     const turns = Number(sessionStorage.getItem(TURNS_KEY) || 0) + 1;
@@ -424,7 +449,7 @@
       },
       {
         onDone: ({ text }) => {
-          if (state.settings.bridgeEnabled && state.tools.length && text.length < 1500 && DENIAL.test(text)) {
+          if (isActive() && state.tools.length && text.length < 1500 && DENIAL.test(text)) {
             state.forceFull = true;
             widget.log('err', 'La IA dice que no tiene acceso: renovaré las instrucciones en tu próximo mensaje.');
           }
