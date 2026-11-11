@@ -30,6 +30,18 @@
 
   const CSS = `
     :host { all: initial; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #dde2dc; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #67736d; }
+    @media (prefers-color-scheme: dark) {
+      ::-webkit-scrollbar-thumb { background: #2c373b; }
+      ::-webkit-scrollbar-thumb:hover { background: #91a09a; }
+    }
+    * { scrollbar-width: thin; scrollbar-color: #dde2dc transparent; }
+    @media (prefers-color-scheme: dark) {
+      * { scrollbar-color: #2c373b transparent; }
+    }
     .wrap {
       --bg:#ffffff; --fg:#16211d; --muted:#67736d; --line:#dde2dc; --accent:#0f766e; --accent-fg:#fff;
       --ok:#16a34a; --warn:#d97706; --err:#dc2626;
