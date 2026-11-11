@@ -5,7 +5,8 @@ import zlib
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "icons"
-TOP, BOTTOM = (15, 118, 110), (20, 184, 166)  # verde azulado profundo → turquesa
+# Colores cambiados a violeta/fucsia para diferenciar claramente este Fork del original
+TOP, BOTTOM = (88, 28, 135), (192, 38, 211)  # violeta profundo → fucsia
 
 
 def shade(u: float, v: float):
@@ -30,6 +31,11 @@ def shade(u: float, v: float):
     for x in (0.34, 0.5, 0.66):
         if abs(u - x) < 0.012 and 0.74 - math.sqrt(max(0, 0.37**2 - (x - 0.5) ** 2)) / 1.15 + 0.02 < v < 0.74:
             white = True
+            
+    # También añadimos una línea horizontal extra en el centro para hacerlo más distinto
+    if 0.48 <= u <= 0.52 and 0.25 <= v <= 0.74:
+        white = True
+
     return (255, 255, 255, 255) if white else (*base, 255)
 
 
