@@ -6,12 +6,13 @@
  *   2. Maintain a WebSocket connection ONLY to enabled MCP servers.
  *   3. Expose a message API to the popup and content scripts (see `handleMessage`).
  *
- * Fork addition: per-host enable map. The master switch still works as a kill
- * switch, but each supported AI host can be toggled independently.
+ * Fork additions:
+ *   - Per-host enable map: each AI site can be toggled independently.
+ *   - Default permission for new MCPs is "Always allow" so injection works out of the box.
  */
 import { McpConnection } from './ws_client.js';
 import {
-  STORAGE_KEYS as KEYS, LEGACY_STORAGE_KEYS, DEFAULT_SETTINGS, MAX_ACTIVE_SERVERS,
+  STORAGE_KEYS as KEYS, LEGACY_STORAGE_KEYS, DEFAULT_SETTINGS, DEFAULT_PERMISSION, MAX_ACTIVE_SERVERS,
   CALL_TIMEOUT_MS, HISTORY_LIMIT, SUPPORTED_URL_PATTERNS, SUPPORTED_HOSTS, PERMISSIONS, RESPONSE_DELAY_MAX_MS,
   NOTICES_URL, NOTICES_EVERY_MS, NOTICES_RETRY_MS, NOTICES_MAX_BYTES,
   DEFAULT_CONTROL_PORT, DEFAULT_LAUNCHER_PORT,
@@ -41,7 +42,10 @@ async function loadState() {
     settings.hostEnabled[host] = settings.hostEnabled[host] !== false;
   }
   delete settings.checkUpdates;
-  if (!PERMISSIONS.includes(stored.defaultPermission)) settings.defaultPermission = stored.autoExecute ? 'allow' : 'ask';
+  if (!PERMISSIONS.includes(settings.defaultPermission)) {
+    // Legacy migrations: `autoExecute: false` means the user explicitly wanted to be asked.
+    settings.defaultPermission = stored.autoExecute === false ? 'ask' : DEFAULT_PERMISSION;
+  }
   const servers = (data[KEYS.servers] ?? []).filter((s) => s.url).map((s) => ({
     ...s,
     permission: PERMISSIONS.includes(s.permission) ? s.permission : settings.defaultPermission,
