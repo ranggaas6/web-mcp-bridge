@@ -420,6 +420,13 @@ const mutations = {
       }
       clean.hostEnabled = merged;
     }
+    if ('bridgeEnabled' in clean && clean.bridgeEnabled !== settings.bridgeEnabled) {
+      if (clean.bridgeEnabled) {
+        if (globalThis.wmbxNative && globalThis.wmbxNative.isAvailable()) globalThis.wmbxNative.start();
+      } else {
+        if (globalThis.wmbxNative && globalThis.wmbxNative.isAvailable()) globalThis.wmbxNative.stop();
+      }
+    }
     await chrome.storage.local.set({ [KEYS.settings]: { ...settings, ...clean } });
   }),
 
