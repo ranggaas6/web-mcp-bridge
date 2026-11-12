@@ -4,109 +4,116 @@
 
 # Web MCP Bridge (Fork)
 
-**Use your local MCP servers with ChatGPT, Gemini, Claude Web and DeepSeek: no API keys, no extra subscriptions.**
+**Gunakan MCP server lokal dari ChatGPT, Gemini, Claude Web, dan DeepSeek: tanpa API key, tanpa langganan tambahan.**
 
-[![English](https://img.shields.io/badge/English-Click-2563eb?style=flat-square)](README.md)
-![Manifest V3](https://img.shields.io/badge/Manifest-V3-0f766e?style=flat-square&logo=googlechrome&logoColor=white)
+[![Manifest V3](https://img.shields.io/badge/Manifest-V3-0f766e?style=flat-square&logo=googlechrome&logoColor=white)](https://github.com/ranggaas6/web-mcp-bridge)
 ![License MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 ![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=flat-square&logo=python&logoColor=white)
 ![Chrome | Edge | Brave](https://img.shields.io/badge/Chrome%20%7C%20Edge%20%7C%20Brave-116%2B-informational?style=flat-square)
-
-[![GitHub](https://img.shields.io/badge/GitHub-ranggaas6-181717?style=flat-square&logo=github)](https://github.com/ranggaas6/web-mcp-bridge)
 
 </div>
 
 ---
 
-> **Web MCP Bridge (Fork)** lets the free web versions of ChatGPT, Gemini, Claude and DeepSeek **use tools on your own computer**: read files, control programs, query your data, with no API keys and no extra subscriptions. **You approve every action.**
+> **Web MCP Bridge (Fork)** memungkinkan versi web gratis ChatGPT, Gemini, Claude, dan DeepSeek **memakai tool di komputer Anda**: membaca berkas, mengontrol program, mengakses data, tanpa API key dan tanpa langganan tambahan. **Anda menyetujui setiap aksi.**
 
 > [!NOTE]
-> This is a **fork** of [AstraxOf/web-mcp-bridge](https://github.com/AstraxOf/web-mcp-bridge) that can be installed **side by side** with the original, on the same browser and machine. It is the bridge used by the [Easy-Vibe](https://github.com/ranggaas6/Easy-Vibe) project.
+> Ini adalah **fork** dari [AstraxOf/web-mcp-bridge](https://github.com/AstraxOf/web-mcp-bridge) yang bisa dipasang **berdampingan** dengan upstream pada browser dan mesin yang sama. Ini adalah bridge yang dipakai proyek [Easy-Vibe](https://github.com/ranggaas6/Easy-Vibe).
 >
-> Differences from upstream:
+> Perbedaan dari upstream:
 >
-> | | Upstream | This fork |
+> | | Upstream | Fork ini |
 > |---|---|---|
-> | Extension name | Web MCP Bridge | Web MCP Bridge (Fork) |
+> | Nama ekstensi | Web MCP Bridge | Web MCP Bridge (Fork) |
 > | `chrome.storage` | `wmb_*` | `wmbx_*` |
 > | `sessionStorage` | `wmb:*` | `wmbx:*` |
-> | Injection marker | `[WMB:...]` | `[WMBX:...]` |
+> | Penanda injeksi | `[WMB:...]` | `[WMBX:...]` |
 > | Web Lock | `wmb-alive` | `wmbx-alive` |
-> | Control port | 8099 | 8199 |
-> | Launcher port | 8098 | 8198 |
-> | Hub port (gitdesktop) | 8090 | 8190 |
->
-> The fork is **English only**. It keeps the welcome page, the notices feed, and OS notifications, all in English.
+> | Port kontrol | 8099 | 8199 |
+> | Port launcher | 8098 | 8198 |
+> | Port hub | 8090 | 8190 |
+> | Izin native messaging | tidak | ya |
 
 > [!IMPORTANT]
-> Only connect MCP servers you trust. A tool with filesystem access can read whatever you allow it to.
+> Hanya hubungkan MCP server yang Anda percaya. Tool dengan akses filesystem bisa membaca apa pun yang Anda izinkan.
 
-## How it works (in 20 seconds)
+## Cara kerja (20 detik)
 
-Two pieces work together:
+Dua bagian bekerja bersama:
 
-| Piece | What it is | Where it lives |
+| Bagian | Apa itu | Di mana |
 |---|---|---|
-| The extension | Installed in your browser. It reads what the AI asks for and shows you the buttons and permissions. | Chrome, Edge or Brave |
-| The bridge | A small Python program that connects the extension to your tools (MCP servers). | Your computer, in the background |
+| Ekstensi | Dipasang di browser. Membaca permintaan AI, menampilkan tombol dan izin. | Chrome, Edge, Brave |
+| Bridge | Program Python kecil yang menghubungkan ekstensi ke tool (MCP server). | Komputer Anda, di latar belakang |
 
-1. You ask the AI something in the chat.
-2. The AI answers with an "order" (a JSON block) asking for a tool.
-3. The extension asks if you allow it, runs it on your PC, and **pastes the result back into the chat** so the AI can continue.
+1. Anda bertanya ke AI di chat.
+2. AI menjawab dengan blok JSON yang meminta tool.
+3. Ekstensi meminta izin, menjalankan tool di PC, lalu **menempelkan hasilnya kembali ke chat** agar AI melanjutkan.
 
-## What you need
+## Pemicu otomatis via tab DeepSeek (khusus fork ini)
 
-- **Chrome, Edge or Brave** (version 116 or newer)
-- **Python 3.9 or newer** ([python.org/downloads](https://www.python.org/downloads/), tick "Add Python to PATH")
-- **This project downloaded** (Code -> Download ZIP, or `git clone`). Keep it in a permanent folder: the extension loads from there.
+Fork ini menambahkan **native messaging host** sehingga bridge tidak perlu dinyalakan manual dan tidak berjalan 24 jam:
 
-Optional: **Node.js**, if you use MCP servers launched with `npx`.
+1. Anda membuka tab `chat.deepseek.com` di Brave.
+2. Service worker (`background/index.js`) memuat `background/native_host.js`.
+3. Modul itu mengirim `{action:"start"}` ke native host `com.ranggaas6.easy_vibe`.
+4. Native host menjalankan `~/.easy-vibe/start-easy-vibe.fish` dan mencatat PID ke `~/.easy-vibe/bridge.pid`.
+5. Bridge hidup, `coding-mcp` dan `filesystem` tersedia di port masing-masing.
+6. Saat tab DeepSeek terakhir ditutup, modul mengirim `{action:"stop"}`; native host mematikan bridge dan child server-nya.
+7. Jika Brave ditutup, stdin native host mendapat EOF dan host juga mematikan bridge.
 
-## Installation (Windows)
+Native host, manifest Brave, dan skrip `install.fish` disediakan oleh repo [Easy-Vibe](https://github.com/ranggaas6/Easy-Vibe). Tanpa native host terpasang, tombol **Start/Stop** di popup tetap berfungsi seperti upstream, tetapi pemicu tab DeepSeek tidak aktif.
 
-1. Open the `server` folder and **double-click `install.cmd`**. Wait until it says *Done*.
-2. Type `chrome://extensions` in the address bar (Edge: `edge://extensions`).
-3. Turn on **Developer mode**, click **Load unpacked**, and pick the project folder.
-4. Pin the extension with the puzzle icon.
+## Yang Anda butuhkan
 
-The welcome page opens automatically and checks each step.
+- **Chrome, Edge, atau Brave** versi 116+
+- **Python 3.9+**
+- **Proyek ini diunduh** (Code -> Download ZIP, atau `git clone`), disimpan di folder permanen karena ekstensi memuat dari sana.
+- Opsional: **Node.js** jika memakai MCP server via `npx`.
 
-## Installation (macOS / Linux)
+## Instalasi (Windows)
+
+1. Buka folder `server`, klik dua kali `install.cmd`. Tunggu sampai *Done*.
+2. Ketik `chrome://extensions` (Edge: `edge://extensions`).
+3. Aktifkan **Developer mode**, klik **Load unpacked**, pilih folder proyek.
+4. Sematkan ekstensi lewat ikon puzzle.
+
+## Instalasi (macOS / Linux)
 
 ```bash
 python3 server/install_service.py
 ```
 
-Then load the extension as in step 2 above.
+Lalu muat ekstensi seperti langkah 2 di atas. Untuk pemasangan lengkap dengan pemicu tab DeepSeek di CachyOS, gunakan installer Easy-Vibe, bukan langkah ini.
 
-## Control the bridge from the extension
+## Kontrol bridge dari ekstensi
 
-In the popup, bridge card:
+Di popup, kartu bridge:
 
-| Button | What it does |
+| Tombol | Fungsi |
 |---|---|
-| **Start** | Turns the bridge on (if it was off) |
-| **Stop** | Turns it off and keeps it off until you start it again |
-| **Restart** | Closes and reopens it |
-| **JSON editor / Add MCP** | Opens the `servers.json` editor with live validation |
+| **Start** | Menyalakan bridge (jika mati) |
+| **Stop** | Mematikan bridge dan membiarkannya mati sampai Anda menyalakan lagi |
+| **Restart** | Menutup dan membuka ulang |
+| **JSON editor / Add MCP** | Membuka editor `servers.json` dengan validasi langsung |
 
-The big switch in the header only makes the extension stop acting (icon shows `OFF`). "Stop" closes the program on your PC.
+Sakelar besar di header hanya membuat ekstensi berhenti bertindak (ikon `OFF`). **Stop** mematikan program di PC.
 
-## Your first time (60 seconds)
+## Pertama kali (60 detik)
 
-The project ships with a **demo server (`demo`)** so you can try it without installing anything else.
+Proyek menyertakan **demo server (`demo`)** untuk uji cepat tanpa memasang apa pun.
 
-1. Open the popup, Servers tab, turn on the **demo** switch.
-2. Open ChatGPT, Gemini, Claude or DeepSeek.
-3. Type something like: "What time is it? Use your tools."
-4. The AI asks for a tool, a prompt appears, click **Run**.
-5. The result is pasted into the chat and the AI answers you.
+1. Buka popup, tab Servers, nyalakan sakelar **demo**.
+2. Buka ChatGPT, Gemini, Claude, atau DeepSeek.
+3. Ketik misalnya: "Jam berapa sekarang? Pakai tool."
+4. AI meminta tool, muncul prompt, klik **Run**.
+5. Hasilnya ditempel ke chat dan AI menjawab.
 
-By default permission is **Always ask**: nothing runs unless you approve it.
+Secara default izinnya **Always ask**: tidak ada yang berjalan tanpa persetujuan Anda.
 
-## Add your own MCP servers
+## Menambah MCP server sendiri
 
-Your servers are defined in `server/servers.json`. Example:
+Server didefinisikan di `server/servers.json`. Contoh:
 
 ```json
 {
@@ -119,20 +126,35 @@ Your servers are defined in `server/servers.json`. Example:
 }
 ```
 
-Click **JSON editor / Add MCP** in the popup, save, and within ~2 seconds it shows up in the list. Up to **5** at once; **1** costs fewer tokens. To disable one: add `"disabled": true`.
+Klik **JSON editor / Add MCP** di popup, simpan, dan dalam ~2 detik server muncul di daftar. Maksimum **5** sekaligus; **1** lebih hemat token. Untuk menonaktifkan: tambahkan `"disabled": true`.
+
+Contoh `servers.json` yang ditulis Easy-Vibe memakai path absolut agar tidak bergantung pada PATH:
+
+```json
+{
+  "control_port": 8199,
+  "launcher_port": 8198,
+  "servers": [
+    { "name": "coding-mcp", "port": 8190, "command": ["/home/USER/.npm-global/bin/coding-mcp", "serve", "--transport", "stdio"] },
+    { "name": "filesystem", "port": 8192, "command": ["/home/USER/go/bin/mcp-filesystem-server", "/home/USER"] }
+  ]
+}
+```
 
 ## Troubleshooting
 
-| Symptom | Fix |
+| Gejala | Perbaikan |
 |---|---|
-| Popup says "Bridge is off" | Click **Start**. If greyed out, double-click `server/install.cmd`. |
-| "Launcher missing" | Normal the first time: run `server/install.cmd` once. |
-| `python` is not recognized | Reinstall Python ticking **Add Python to PATH**, or try `py`. |
-| "Port in use" | Click **Restart**. If it persists, change that server's `port`. |
-| Red notice "servers.json has an error" | A comma or quote is misplaced. Fix it and save. |
-| Chat does not react | Reload the tab (F5) and check the header switch is on. |
+| Popup bilang "Bridge is off" | Klik **Start**, atau buka tab DeepSeek jika native host terpasang. |
+| "Launcher missing" | Normal pada instalasi manual: jalankan `server/install.cmd` sekali. |
+| `python` tidak dikenali | Pasang ulang Python dengan **Add Python to PATH**, atau coba `py`. |
+| "Port in use" | Klik **Restart**, atau ubah `port` server itu. |
+| Notifikasi merah "servers.json has an error" | Ada koma atau kutip salah tempat. Perbaiki dan simpan. |
+| Chat tidak bereaksi | Muat ulang tab (F5) dan pastikan sakelar header menyala. |
+| Pemicu tab DeepSeek tidak jalan | Pastikan manifest `com.ranggaas6.easy_vibe.json` ada di folder NativeMessagingHosts Brave dan `allowed_origins` memuat ID ekstensi Anda. |
+| `Access to the specified native messaging host is forbidden` | `allowed_origins` tidak cocok dengan ID ekstensi. Jalankan ulang installer Easy-Vibe dengan `--extension-id`. |
 
-## Supported platforms
+## Platform yang didukung
 
 | Platform | Adapter |
 |---|---|
@@ -141,13 +163,13 @@ Click **JSON editor / Add MCP** in the popup, save, and within ~2 seconds it sho
 | Claude | `adapters/claude.js` |
 | DeepSeek | `adapters/deepseek.js` |
 
-## Call protocol
+## Protokol panggilan
 
 ```json
 { "mcp_call": { "server": "server_name", "name": "tool_name", "arguments": { "arg1": "value" } } }
 ```
 
-Results come back as:
+Hasil dikembalikan sebagai:
 
 ```
 [MCP_RESULT server="..." tool="..." status="ok|error|rejected"]
@@ -155,25 +177,25 @@ Results come back as:
 [/MCP_RESULT]
 ```
 
-The content of `MCP_RESULT` is presented to the AI as *data*, not instructions (prompt-injection mitigation).
+Isi `MCP_RESULT` diperlakukan sebagai *data*, bukan instruksi (mitigasi prompt injection).
 
-## Security model
+## Model keamanan
 
-| Risk | Mitigation |
+| Risiko | Mitigasi |
 |---|---|
-| A website opens `ws://localhost` and runs tools | The bridge rejects any `Origin` that is not a browser extension. |
-| The AI runs unwanted actions | "Always ask" is the default; explicit choice per MCP. |
-| Hidden instructions in results | The prompt marks `MCP_RESULT` as data only. |
-| Network exposure | Listens on `127.0.0.1` only; optional token (`--token`). |
-| A website reads or shuts down the control/launcher ports | They only accept extension `Origin`s and local `Host`s. |
+| Situs membuka `ws://localhost` dan menjalankan tool | Bridge menolak `Origin` yang bukan ekstensi browser. |
+| AI menjalankan aksi yang tidak diinginkan | "Always ask" adalah default; pilihan eksplisit per MCP. |
+| Instruksi tersembunyi dalam hasil | Prompt menandai `MCP_RESULT` sebagai data saja. |
+| Eksposur jaringan | Hanya mendengarkan `127.0.0.1`; token opsional (`--token`). |
+| Situs membaca/mematikan port kontrol atau launcher | Hanya menerima `Origin` ekstensi dan `Host` lokal. |
 
-## Contributing
+## Kontribusi
 
-This fork accepts issues and pull requests at [ranggaas6/web-mcp-bridge](https://github.com/ranggaas6/web-mcp-bridge).
+Fork ini menerima issue dan pull request di [ranggaas6/web-mcp-bridge](https://github.com/ranggaas6/web-mcp-bridge).
 
 <div align="center">
 
-Fork maintained by [@ranggaas6](https://github.com/ranggaas6). Upstream project by [@AstraxOf](https://github.com/AstraxOf).
+Fork dikelola oleh [@ranggaas6](https://github.com/ranggaas6). Proyek upstream oleh [@AstraxOf](https://github.com/AstraxOf).
 
 **[MIT License](LICENSE)**
 
