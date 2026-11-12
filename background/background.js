@@ -565,6 +565,20 @@ async function bridgeGlobal(action) {
   await reconcile();
   scheduleBroadcast();
 
+  if (globalThis.wmbxNative && globalThis.wmbxNative.isAvailable()) {
+    try {
+      if (action === 'stop') globalThis.wmbxNative.stop();
+      else if (action === 'start') globalThis.wmbxNative.start();
+      else if (action === 'restart') globalThis.wmbxNative.restart();
+      await delay(1500);
+      await probeBridge(true);
+      scheduleBroadcast();
+      return { ok: true, native: true };
+    } catch (err) {
+      console.warn('[WMB] native control failed, falling back to HTTP:', err);
+    }
+  }
+
   const before = await probeBridge(true);
   let res;
   if (action === 'stop') {
