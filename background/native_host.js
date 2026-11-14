@@ -1,22 +1,27 @@
 /**
- * native_host.js — Pemicu bridge berdasarkan tab DeepSeek.
+ * native_host.js — Pemicu bridge berdasarkan tab AI yang didukung.
  *
- * Bridge (mcp_ws_bridge.py) hanya hidup selama ada tab chat.deepseek.com
- * yang terbuka. Modul ini mengirim perintah start/stop ke native host
+ * Bridge (mcp_ws_bridge.py) hanya hidup selama ada minimal satu tab AI yang
+ * didukung terbuka: chatgpt.com, gemini.google.com, claude.ai, atau
+ * chat.deepseek.com. Modul ini mengirim perintah start/stop ke native host
  * (com.ranggaas6.easy_vibe) yang dipasang oleh installer Easy-Vibe.
+ *
+ * Sebelumnya hanya tab chat.deepseek.com yang memicu bridge. Sekarang daftar
+ * host diambil dari SUPPORTED_URL_PATTERNS (shared/constants.js) sehingga
+ * ChatGPT, Gemini, Claude, dan DeepSeek semuanya memicu bridge secara otomatis.
  */
+import { SUPPORTED_URL_PATTERNS } from '../shared/constants.js';
 
 const HOST_NAME = 'com.ranggaas6.easy_vibe';
-const DEEPSEEK_PATTERN = 'https://chat.deepseek.com/*';
 
 let port = null;
-let deepseekTabCount = 0;
+let triggerTabCount = 0;
 let started = false;
 let userStopped = false;
 
-async function countDeepseekTabs() {
+async function countTriggerTabs() {
   try {
-    const tabs = await chrome.tabs.query({ url: DEEPSEEK_PATTERN });
+    const tabs = await chrome.tabs.query({ url: SUPPORTED_URL_PATTERNS });
     return tabs.length;
   } catch { return 0; }
 }
@@ -54,14 +59,14 @@ function sendNative(action) {
 }
 
 async function reconcileTabs() {
-  const count = await countDeepseekTabs();
+  const count = await countTriggerTabs();
   if (count > 0 && !started && !userStopped) {
     if (sendNative('start')) started = true;
   } else if (count === 0 && started) {
     if (sendNative('stop')) started = false;
     userStopped = false;
   }
-  deepseekTabCount = count;
+  triggerTabCount = count;
 }
 
 globalThis.wmbxNative = {
@@ -85,7 +90,7 @@ globalThis.wmbxNative = {
       if (sendNative('start')) started = true;
     }, 2000);
     return true;
-  }
+  },
 };
 
 chrome.tabs.onCreated.addListener(() => { reconcileTabs().catch(() => {}); });
