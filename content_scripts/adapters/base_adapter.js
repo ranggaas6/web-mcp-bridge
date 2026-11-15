@@ -132,14 +132,16 @@
           const calls = WMB.extractMcpCalls(i === last ? text : element.textContent || '');
           calls.forEach((call, n) => {
             if (!baseline && !this.#isFresh(messages, text)) { this.debug?.('err', 'Call ignored: this is the same message as before (no new AI response).'); return; }
+            
+            if (!baseline && element.__wmbFired) { this.debug?.('err', 'Call ignored: this message already fired a call (duplicate blocked).'); return; }
             let id = `${this.getMessageKey(element, i)}#${n}:${WMB.hash(JSON.stringify(call))}`;
             if (this.executed.has(id)) {
-              if (baseline || i !== last || streaming || n !== 0 || !this.genSinceDelivery) return;
+              if (baseline || i !== last || streaming || n !== 0 || !this.genSinceDelivery || i < this.msgsAtDelivery) return;
               id = `${id}~r${this.deliveries}`;
               if (this.executed.has(id)) return;
             }
             this.#remember(id);
-            if (!baseline && n === 0) callback({ id, call, element, extra: calls.length - 1 });
+            if (!baseline && n === 0) { this.debug?.('ok', `[trace] id=${id} i=${i} last=${last} msgs=${messages.length} atDelivery=${this.msgsAtDelivery} gen=${this.genSinceDelivery} streaming=${streaming}`); element.__wmbFired = true; this.sendSnap = this.#snapshot(); callback({ id, call, element, extra: calls.length - 1 }); }
           });
           const looksBad = !baseline && i === last && !calls.length && !streaming && Boolean(WMB.looksMalformed?.(text));
           const quiet = now - stableSince >= this.malformedStableMs;
@@ -368,6 +370,7 @@
     }
 
     forceRescan() {
+      for (const el of this.getAssistantMessages()) el.__wmbFired = false;
       this.baselineUntil = 0;
       this.genSinceDelivery = true;
       this.sendSnap = null;
