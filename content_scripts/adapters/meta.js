@@ -3,7 +3,12 @@
  *
  * Meta AI renders JSON code blocks in a viewer with JSON / Tree / Raw tabs. The Tree view
  * collapses nested objects as "{1 key}", which hides the tool arguments (confirmed in DevTools).
- * Before reading a message we switch every collapsed viewer to its Raw tab.
+ *
+ * Race fix: a message that still shows the collapsed Tree is HIDDEN from the scanner while we
+ * click its Raw tab. The DOM change triggers the base MutationObserver, and the message is
+ * handed over only after Raw is rendered (full arguments). If Raw never appears, the message
+ * is handed over after GIVE_UP_MS so the failure stays visible instead of hanging.
+ *
  * Confirmed working: composer, send button, assistant message selector.
  * Not verified: stopButton, and the exact markup of the Raw tab (found by its visible label).
  */
@@ -11,14 +16,17 @@
   'use strict';
   const WMB = globalThis.WMB;
 
-  const COLLAPSED = /[0-9]+ keys?}/;
+  const COLLAPSED = /\{\s*\d+ keys?\s*\}/;
   const RAW_LABEL = /^raw$/i;
   const RETRY_MS = 1500;
+  const GIVE_UP_MS = 6000;
   const lastClick = new WeakMap();
+  const firstSeen = new WeakMap();
 
-  /** If the viewer inside `el` shows the collapsed Tree, click its "Raw" tab. */
-  function switchToRaw(el) {
-    if (!COLLAPSED.test(el.textContent || '')) return;
+  const isCollapsed = (el) => COLLAPSED.test(el.textContent || '');
+
+  /** Click the "Raw" tab inside `el` (throttled per element). */
+  function clickRaw(el) {
     const now = Date.now();
     if (now - (lastClick.get(el) || 0) < RETRY_MS) return;
     lastClick.set(el, now);
@@ -64,9 +72,13 @@
     }
 
     getAssistantMessages() {
-      const list = super.getAssistantMessages();
-      list.forEach(switchToRaw);
-      return list;
+      const now = Date.now();
+      return super.getAssistantMessages().filter((el) => {
+        if (!isCollapsed(el)) { firstSeen.delete(el); return true; }
+        if (!firstSeen.has(el)) firstSeen.set(el, now);
+        clickRaw(el);
+        return now - firstSeen.get(el) >= GIVE_UP_MS;
+      });
     }
   }
 
