@@ -48,7 +48,7 @@ export const DEFAULT_LAUNCHER_PORT = 8198;
  * Hosts (AI chat platforms) where the bridge can operate.
  * Per-host toggles let the user keep, for example, DeepSeek on while Claude stays off.
  */
-export const SUPPORTED_HOSTS = ['chatgpt.com', 'gemini.google.com', 'claude.ai', 'chat.deepseek.com'];
+export const SUPPORTED_HOSTS = ['chatgpt.com', 'gemini.google.com', 'claude.ai', 'chat.deepseek.com', 'www.meta.ai'];
 
 /** Friendly labels for each supported host (used by the popup and the widget). */
 export const HOST_LABELS = {
@@ -56,6 +56,7 @@ export const HOST_LABELS = {
   'gemini.google.com': 'Gemini',
   'claude.ai': 'Claude',
   'chat.deepseek.com': 'DeepSeek',
+  'www.meta.ai': 'Meta AI',
 };
 
 /** Build a fresh all-on host map. */
@@ -73,6 +74,7 @@ export const DEFAULT_SETTINGS = {
     'gemini.google.com': true,
     'claude.ai': true,
     'chat.deepseek.com': true,
+    'www.meta.ai': true,
   },
   /** Automatically add tool instructions when sending the first message. */
   autoInject: true,
@@ -132,4 +134,5 @@ export const SUPPORTED_URL_PATTERNS = [
   'https://gemini.google.com/*',
   'https://claude.ai/*',
   'https://chat.deepseek.com/*',
+  'https://www.meta.ai/*',
 ];

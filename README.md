@@ -4,7 +4,7 @@
 
 # Web MCP Bridge (Fork)
 
-**Gunakan MCP server lokal dari ChatGPT, Gemini, Claude Web, dan DeepSeek: tanpa API key, tanpa langganan tambahan.**
+**Gunakan MCP server lokal dari ChatGPT, Gemini, Claude Web, DeepSeek, dan Meta AI: tanpa API key, tanpa langganan tambahan.**
 
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-0f766e?style=flat-square&logo=googlechrome&logoColor=white)](https://github.com/ranggaas6/web-mcp-bridge)
 ![License MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
@@ -162,6 +162,7 @@ Contoh `servers.json` yang ditulis Easy-Vibe memakai path absolut agar tidak ber
 | Gemini | `adapters/gemini.js` |
 | Claude | `adapters/claude.js` |
 | DeepSeek | `adapters/deepseek.js` |
+| Meta AI | `adapters/meta.js` |
 
 ## Protokol panggilan
 

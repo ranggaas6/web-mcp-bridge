@@ -2,8 +2,8 @@
  * native_host.js — Pemicu bridge berdasarkan tab AI yang didukung.
  *
  * Bridge (mcp_ws_bridge.py) hanya hidup selama ada minimal satu tab AI yang
- * didukung terbuka: chatgpt.com, gemini.google.com, claude.ai, atau
- * chat.deepseek.com. Modul ini mengirim perintah start/stop ke native host
+ * didukung terbuka: chatgpt.com, gemini.google.com, claude.ai,
+ * chat.deepseek.com, atau www.meta.ai. Modul ini mengirim perintah start/stop ke native host
  * (com.ranggaas6.easy_vibe) yang dipasang oleh installer Easy-Vibe.
  *
  * Sebelumnya hanya tab chat.deepseek.com yang memicu bridge. Sekarang daftar
