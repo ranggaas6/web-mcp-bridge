@@ -58,7 +58,7 @@ Fork ini menambahkan **native messaging host** sehingga bridge tidak perlu dinya
 2. Service worker (`background/index.js`) memuat `background/native_host.js`.
 3. Modul itu mengirim `{action:"start"}` ke native host `com.ranggaas6.easy_vibe`.
 4. Native host menjalankan `~/.easy-vibe/start-easy-vibe.fish` dan mencatat PID ke `~/.easy-vibe/bridge.pid`.
-5. Bridge hidup, `coding-mcp` dan `filesystem` tersedia di port masing-masing.
+5. Bridge hidup; `coding-mcp` (8190), `github` (8191), dan `filesystem` (8192) tersedia di port masing-masing.
 6. Saat tab DeepSeek terakhir ditutup, modul mengirim `{action:"stop"}`; native host mematikan bridge dan child server-nya.
 7. Jika Brave ditutup, stdin native host mendapat EOF dan host juga mematikan bridge.
 
@@ -135,11 +135,20 @@ Contoh `servers.json` yang ditulis Easy-Vibe memakai path absolut agar tidak ber
   "control_port": 8199,
   "launcher_port": 8198,
   "servers": [
-    { "name": "coding-mcp", "port": 8190, "command": ["/home/USER/.npm-global/bin/coding-mcp", "serve", "--transport", "stdio"] },
+    { "name": "coding-mcp", "port": 8190, "command": ["/home/USER/.npm-global/bin/coding-mcp", "serve", "--transport", "stdio"], "env": { "ALLOWED_COMMANDS": "cargo,rustc,git,pgrep,node,npm" } },
+    { "env": { "GITHUB_TOKEN": "GANTI_DENGAN_TOKEN" }, "name": "github", "port": 8191, "command": ["/home/USER/.npm-global/bin/github-mcp-server-kosta"] },
     { "name": "filesystem", "port": 8192, "command": ["/home/USER/go/bin/mcp-filesystem-server", "/home/USER"] }
   ]
 }
 ```
+
+## Alur kerja dengan Easy-Vibe (Opsi B)
+
+Installer Easy-Vibe memasang bridge ini ke `~/.easy-vibe/web-mcp-bridge`, menulis `server/servers.json` (chmod 600, memuat `GITHUB_TOKEN` untuk server `github`, jangan di-commit), dan membungkus tiap server dengan `mcp-audit` bila `go` tersedia.
+
+Alur kerja yang direkomendasikan (**Opsi B**): berkas dan Git dikerjakan di disk lokal lewat `coding-mcp` (`write_file`, `apply_patch`, `git_*`); server `github` hanya untuk hal yang ada di remote (PR, issue, release, `github_delete_branch`, verifikasi). Push non-interaktif berhasil karena installer menyiapkan `credential.helper store` dan `~/.git-credentials`. Detail lengkap, aturan hapus folder, dan hasil uji: [docs/opsi-b.md](https://github.com/ranggaas6/Easy-Vibe/blob/main/docs/opsi-b.md) di repo Easy-Vibe.
+
+Catatan: `coding-mcp` hanya mendeteksi proyek satu level di bawah root, jadi folder ini (`~/.easy-vibe/web-mcp-bridge`) mungkin tidak muncul di `list_projects`; salin ke satu level di bawah `$HOME`, `refresh_project_index`, lalu bekerja di salinan.
 
 ## Troubleshooting
 
@@ -153,6 +162,8 @@ Contoh `servers.json` yang ditulis Easy-Vibe memakai path absolut agar tidak ber
 | Chat tidak bereaksi | Muat ulang tab (F5) dan pastikan sakelar header menyala. |
 | Pemicu tab DeepSeek tidak jalan | Pastikan manifest `com.ranggaas6.easy_vibe.json` ada di folder NativeMessagingHosts Brave dan `allowed_origins` memuat ID ekstensi Anda. |
 | `Access to the specified native messaging host is forbidden` | `allowed_origins` tidak cocok dengan ID ekstensi. Jalankan ulang installer Easy-Vibe dengan `--extension-id`. |
+| `github` Connection error | Token kosong atau tidak valid di `servers.json`. Jalankan ulang installer Easy-Vibe dengan `--github-token`. |
+| `git push` gagal `could not read Username` | `credential.helper store` belum aktif. Jalankan ulang installer Easy-Vibe dengan token, atau periksa `~/.git-credentials`. |
 
 ## Platform yang didukung
 
