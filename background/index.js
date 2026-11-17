@@ -5,4 +5,5 @@
  * Dipisah agar background.js (besar) tidak perlu diubah saat menambah modul.
  */
 import './native_host.js';
+import './conv_relay.js';
 import './background.js';

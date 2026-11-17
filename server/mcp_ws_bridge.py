@@ -463,6 +463,31 @@ async def _save_config(sup: "Supervisor", config_path: Path | None, text: str) -
                  "restart_needed": file_control is not None and file_control != sup.control_port}
 
 
+CONV_MAX_BYTES = 2_000_000
+
+
+async def _conv_route(reader, headers: dict, op: str) -> tuple[int, dict]:
+    """/conv/state and /conv/append: isolated from the bridge; any failure is only an error reply."""
+    try:
+        length = int(headers.get("content-length") or 0)
+        if length <= 0 or length > CONV_MAX_BYTES:
+            return 400, {"ok": False, "error": "empty or too large body"}
+        raw = await asyncio.wait_for(reader.readexactly(length), 10)
+        body = json.loads(raw.decode("utf-8"))
+        if not isinstance(body, dict):
+            return 400, {"ok": False, "error": "body must be an object"}
+        here = str(Path(__file__).resolve().parent)
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import conv_store  # lazy: if it fails, only /conv/* fails
+        fn = conv_store.state if op == "state" else conv_store.append
+        result = await asyncio.to_thread(fn, body)
+        return (200 if result.get("ok") else 400), result
+    except Exception as err:  # noqa: BLE001
+        log.warning("conv %s: %s", op, err)
+        return 500, {"ok": False, "error": str(err)[:200]}
+
+
 async def _control_handler(reader, writer, sup: Supervisor, config_path: Path | None) -> None:
     origin = None
     try:
@@ -501,6 +526,11 @@ async def _control_handler(reader, writer, sup: Supervisor, config_path: Path | 
                     await _http_reply(writer, status, payload, origin)
         elif path == "/config":
             await _http_reply(writer, 405, {"ok": False, "error": "use GET or POST"}, origin)
+        elif path in ("/conv/state", "/conv/append") and method == "POST":
+            status, payload = await _conv_route(reader, headers, path.rsplit("/", 1)[1])
+            await _http_reply(writer, status, payload, origin)
+        elif path.startswith("/conv/"):
+            await _http_reply(writer, 405, {"ok": False, "error": "use POST on /conv/state or /conv/append"}, origin)
         elif method == "GET" and path == "/servers":
             await _http_reply(writer, 200, {"ok": True, "version": VERSION, "pid": os.getpid(),
                                             "config": str(config_path) if config_path else None, "config_error": sup.config_error,
