@@ -221,14 +221,18 @@
 
         const nowConv = convOf();
         if (nowConv !== conv) {
-          if (conv !== null) { done.clear(); this.lastActivity = 0; lastDone = ''; }
+          if (conv !== null) {
+            const own = now - this.lastSendAt < ACTIVE_MS;
+            say(`[diag] conversation changed (${conv} -> ${nowConv}), own send ${Math.round((now - this.lastSendAt) / 1000)}s ago${own ? ': keeping activity' : ': resetting to baseline'}.`);
+            if (!own) { done.clear(); this.lastActivity = 0; lastDone = ''; }
+          }
           conv = nowConv;
         }
 
         const streaming = this.isStreaming();
         if (streaming) this.lastActivity = now;
         if (streaming && this.lastDeliveryAt) this.genSinceDelivery = true;
-        const baseline = now - this.lastActivity >= ACTIVE_MS;
+        const baseline = now - Math.max(this.lastActivity, this.lastSendAt) >= ACTIVE_MS;
 
         const tally = new Map();
         const present = new Set();
