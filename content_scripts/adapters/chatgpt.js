@@ -206,8 +206,13 @@
       let scheduled = false;
       let lastDone = '';
       const done = new Map();
+      const noted = new Set();
+      let blocksAtFire = 0;
+      const note = (key, message) => { if (noted.has(key)) return; noted.add(key); say(message); };
       const seen = new WeakMap();
       const say = (message) => { try { this.debug?.('ok', `ChatGPT · ${message}`); } catch { /* no panel */ } };
+      let lastWhy = '';
+      const why = (message) => { if (message !== lastWhy) { lastWhy = message; say(`[diag] ${message}`); } };
       const convOf = () => (location.pathname.match(/\/c\/([^/?#]+)/) || [])[1] || null;
       let conv = convOf();
 
@@ -243,15 +248,18 @@
             tally.set(hash, occurrence + 1);
             const id = `${hash}:${occurrence}`;
             present.add(id);
-            if (!ready) return;
+            if (!ready) { note(`wait:${id}`, `call seen but not ready (baseline=${baseline}, streaming=${streaming}, stable=${Math.round(stableFor)}ms).`); return; }
+            if (baseline) note(`base:${id}`, `call seen but skipped: baseline mode (idle ${Math.round((now - this.lastActivity) / 1000)}s since last activity), marking as done without executing.`);
             let fireId = id;
             if (done.has(id)) {
               if (baseline || streaming || n !== 0 || el !== blocks[blocks.length - 1] || !this.genSinceDelivery) return;
+              if (blocks.length <= blocksAtFire) { note(`dup:${id}:${this.deliveries}`, 'call skipped: same JSON box as before, no new AI message (duplicate blocked).'); return; }
               fireId = `${id}~r${this.deliveries}`;
               if (done.has(fireId)) return;
               present.add(fireId);
             }
             done.set(fireId, { absentSince: 0 });
+            if (!baseline && n === 0) blocksAtFire = blocks.length;
             if (!baseline && n === 0) { say('call detected, executing…'); callback({ id: fireId, call, element: wrap(el) }); }
           });
         }
