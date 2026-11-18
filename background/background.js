@@ -263,7 +263,7 @@ async function getSnapshot() {
   };
 }
 
-async function getActiveTools(sender) {
+async function getActiveTools(sender, msg = {}) {
   await discoverServers().catch(() => {});
   await reconcile();
   const { servers, settings } = await loadState();
@@ -290,7 +290,20 @@ async function getActiveTools(sender) {
       });
     }
   }
-  return { ok: true, tools };
+  // v1.7.2: tool-list fingerprint. If the tab already has this exact list (`since`), do not resend it: with hundreds of tools,
+  // copying the schemas to the page on every heartbeat/focus change overloads the browser.
+  const sig = toolsFingerprint(tools);
+  if (msg?.since && msg.since === sig) return { ok: true, unchanged: true, sig };
+  return { ok: true, tools, sig };
+}
+
+function toolsFingerprint(tools) {
+  let h = 5381;
+  const feed = (s) => { for (let i = 0; i < s.length; i += 1) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; };
+  for (const t of tools) {
+    feed(t.server); feed('\u0001'); feed(t.name); feed('\u0001'); feed(String(t.description?.length ?? 0)); feed('\u0001'); feed(JSON.stringify(t.inputSchema) ?? ''); feed('\u0002');
+  }
+  return `${tools.length}:${h.toString(36)}`;
 }
 
 async function addHistory(entry) {
@@ -764,7 +777,7 @@ async function handleMessage(msg, sender) {
     case 'FOCUS_TAB': return focusTab(sender);
     case 'RESTORE_FOCUS': return restoreFocus(msg);
     case 'GET_STATE': return getSnapshot();
-    case 'GET_ACTIVE_TOOLS': return getActiveTools(sender);
+    case 'GET_ACTIVE_TOOLS': return getActiveTools(sender, msg);
     case 'CALL_TOOL': return callTool(msg, sender);
     case 'DISCOVER':
       if (msg.reset) await chrome.storage.local.remove(KEYS.dismissed);

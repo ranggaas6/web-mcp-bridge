@@ -30,9 +30,17 @@
       .join(', ');
   }
 
-  WMB.toolsSignature = (tools) => WMB.hash(tools.map((t) => `${t.server}.${t.name}`).sort().join('|'));
+  /** Compact parameters of a tool (`a: string, b?: number`); also used by the paginated catalog (tool_catalog.js). */
+  WMB.toolParams = (tool) => {
+    const schema = tool?.inputSchema ?? {};
+    return schema.type === 'object' || schema.properties ? signature(schema) : typeOf(schema);
+  };
+
+  /** Stable signature of a tool set (to detect changes). In catalog mode it changes, so the instructions get renewed. */
+  WMB.toolsSignature = (tools) => WMB.hash(tools.map((t) => `${t.server}.${t.name}`).sort().join('|') + (WMB.catalog?.isActive(tools) ? '|catalog' : ''));
 
   WMB.reminderLine = (tools, mode = 'user') => {
+    if (WMB.catalog?.isActive(tools)) return WMB.catalog.reminder(tools, mode);
     const servers = [...new Set(tools.map((t) => t.server))].join(', ');
     const use = 'respond ONLY with the block {"mcp_call":{"server":"…","name":"…","arguments":{…}}}';
     return mode === 'result'
@@ -41,6 +49,8 @@
   };
 
   WMB.buildSystemPrompt = (tools) => {
+    // v1.7.2: with many tools (> threshold) do not list them all: the AI browses them by pages with wmb.list_tools.
+    const catalog = WMB.catalog?.isActive(tools) ? WMB.catalog.split(tools) : null;
     const byServer = new Map();
     for (const tool of tools) {
       if (!byServer.has(tool.server)) byServer.set(tool.server, { label: tool.serverLabel, tools: [] });
@@ -67,9 +77,11 @@
       '',
       '## Tools',
     ];
+    if (catalog) lines.push(...WMB.catalog.intro(tools, catalog));
 
     if (byServer.size === 0) lines.push('(No active MCP server at the moment.)');
     for (const [slug, { label, tools: serverTools }] of byServer) {
+      if (catalog && !catalog.inline.has(slug)) continue; // large servers go through the catalog only
       lines.push(`### \`${slug}\`${label && label !== slug ? ` (${label})` : ''}`);
       for (const tool of serverTools) {
         const schema = tool.inputSchema ?? {};

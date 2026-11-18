@@ -133,7 +133,7 @@
           calls.forEach((call, n) => {
             if (!baseline && !this.#isFresh(messages, text)) { this.debug?.('err', 'Call ignored: this is the same message as before (no new AI response).'); return; }
             
-            if (!baseline && element.__wmbFired) { this.debug?.('err', 'Call ignored: this message already fired a call (duplicate blocked).'); return; }
+            if (!baseline && element.__wmbFired && element.__wmbFired === WMB.hash(JSON.stringify(call))) { this.debug?.('err', 'Call ignored: this message already fired a call (duplicate blocked).'); return; }
             let id = `${this.getMessageKey(element, i)}#${n}:${WMB.hash(JSON.stringify(call))}`;
             if (this.executed.has(id)) {
               if (baseline || i !== last || streaming || n !== 0 || !this.genSinceDelivery || i < this.msgsAtDelivery) return;
@@ -141,7 +141,7 @@
               if (this.executed.has(id)) return;
             }
             this.#remember(id);
-            if (!baseline && n === 0) { this.debug?.('ok', `[trace] id=${id} i=${i} last=${last} msgs=${messages.length} atDelivery=${this.msgsAtDelivery} gen=${this.genSinceDelivery} streaming=${streaming}`); element.__wmbFired = true; this.sendSnap = this.#snapshot(); callback({ id, call, element, extra: calls.length - 1 }); }
+            if (!baseline && n === 0) { this.debug?.('ok', `[trace] id=${id} i=${i} last=${last} msgs=${messages.length} atDelivery=${this.msgsAtDelivery} gen=${this.genSinceDelivery} streaming=${streaming}`); element.__wmbFired = WMB.hash(JSON.stringify(call)); this.sendSnap = this.#snapshot(); callback({ id, call, element, extra: calls.length - 1 }); }
           });
           const looksBad = !baseline && i === last && !calls.length && !streaming && Boolean(WMB.looksMalformed?.(text));
           const quiet = now - stableSince >= this.malformedStableMs;
@@ -273,6 +273,7 @@
       if (settleMs) await WMB.sleep(settleMs);
 
       const marker = this.#marker(text);
+      this.lastMarker = marker;
       let sent = false;
       for (let n = 1; n <= 3 && !sent; n += 1) {
         if (n > 1) {
@@ -303,8 +304,16 @@
     #norm(value) { return String(value ?? '').replace(/\s+/g, ' ').trim(); }
     #marker(text) { return this.#norm(text).slice(0, 60); }
 
+    hasStaleDraft() {
+      const composer = this.getComposer();
+      if (!composer || !this.lastMarker) return false;
+      return this.#norm(WMB.dom.getText(composer)).includes(this.lastMarker);
+    }
+
     hasReacted() {
-      return this.genSinceDelivery || this.isStreaming() || this.getAssistantMessages().length > this.msgsAtDelivery;
+      if (this.isStreaming()) return true;
+      if (this.hasStaleDraft()) return false;
+      return this.genSinceDelivery || this.getAssistantMessages().length > this.msgsAtDelivery;
     }
 
     async #attemptSend(n, timeout) {

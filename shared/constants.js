@@ -105,6 +105,10 @@ export const DEFAULT_SETTINGS = {
   showNotices: true,
   /** Delay (ms) before delivering each result to the chat. */
   responseDelayMs: 1500,
+  /** v1.7.2: if there are MORE active tools than this, the prompt does not list them all: the AI browses them by pages with wmb.list_tools (0 = always catalog). */
+  catalogThreshold: 40,
+  /** v1.7.2: tools per catalog page (1 - 50). */
+  catalogPageSize: 50,
 };
 
 /** Bounds for the configurable response delay (ms). */
