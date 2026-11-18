@@ -5,7 +5,7 @@
 (() => {
   'use strict';
   const WMB = (globalThis.WMB = globalThis.WMB || {});
-  WMB.VERSION = '1.7.0';
+  WMB.VERSION = '1.7.2';
 
   const nativeSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -304,10 +304,13 @@
       document.execCommand('insertLineBreak');
       document.execCommand('insertLineBreak');
     }
-    text.split('\n').forEach((line, i) => {
+    // v1.7.2: yield to the browser every 25 lines so a huge prompt does not freeze the page ("page unresponsive").
+    const rows = text.split('\n');
+    for (let i = 0; i < rows.length; i += 1) {
       if (i > 0) document.execCommand('insertLineBreak');
-      if (line) document.execCommand('insertText', false, line);
-    });
+      if (rows[i]) document.execCommand('insertText', false, rows[i]);
+      if (rows.length > 60 && i % 25 === 24) await WMB.sleep(0);
+    }
     await WMB.sleep(50);
     if (dom.getText(el).length > before) return true;
 

@@ -32,6 +32,7 @@
   const state = {
     servers: [],
     tools: [],
+    toolsSig: null,
     settings: { autoSend: true, maxResultChars: 12000 },
     hostEnabled: true,
     forceFull: false,
@@ -92,7 +93,7 @@
   }
 
   async function refresh(announce = false) {
-    const [snapshot, active] = await Promise.all([send({ type: 'GET_STATE' }), send({ type: 'GET_ACTIVE_TOOLS' })]);
+    const [snapshot, active] = await Promise.all([send({ type: 'GET_STATE' }), send({ type: 'GET_ACTIVE_TOOLS', since: state.toolsSig })]);
     if (!snapshot?.ok || !active?.ok) {
       const error = snapshot?.error || active?.error || 'Could not contact the extension.';
       if (error !== lastRefreshError) widget.log('err', error);
@@ -103,8 +104,13 @@
     state.settings = snapshot.settings;
     state.hostEnabled = snapshot.settings?.hostEnabled?.[HOST] !== false;
     state.servers = snapshot.servers.filter((s) => s.enabled && s.url);
-    state.tools = active.tools;
-    WMB.tools = state.tools;
+    WMB.catalog?.configure(state.settings);
+    if (!active.unchanged) { // v1.7.2: if nothing changed the service worker does not resend hundreds of tools
+      state.tools = active.tools ?? [];
+      state.toolsSig = active.sig ?? null;
+    }
+    // The tolerant parser uses the schemas (including the local wmb.list_tools tool).
+    WMB.tools = WMB.catalog ? state.tools.concat(WMB.catalog.metaTools) : state.tools;
     adapter.configure({ focusFallback: state.settings.focusFallback !== false });
     widget.update({
       adapterName: adapter.name,
@@ -209,6 +215,7 @@
     if (!isActive()) return;
     const obsolete = () => detected.seq !== undefined && detected.seq !== callSeq;
     if (obsolete()) { widget.log('err', `Obsolete call discarded (${call.name}): there is something newer in the chat.`); return; }
+    if (WMB.catalog?.isMeta(call, state.tools, state.servers)) return handleMeta(detected); // v1.7.2: paginated catalog (local)
     const { srv, tool } = await resolveCall(call);
 
     if (!srv) {
@@ -233,7 +240,9 @@
       result = { status: 'rejected', text: 'The user does not allow using this MCP.' };
       widget.log('err', `Blocked: ${srv.slug} › ${call.name}`);
     } else if (!tool) {
-      const available = state.tools.filter((t) => t.server === srv.slug).map((t) => t.name).join(', ');
+      const available = WMB.catalog
+        ? WMB.catalog.unknownToolHint(state.tools, srv.slug, call.name) // with hundreds of tools do not dump every name
+        : state.tools.filter((t) => t.server === srv.slug).map((t) => t.name).join(', ');
       result = { status: 'error', text: `Tool «${call.name}» does not exist in «${srv.slug}». Available: ${available || 'none'}.` };
     } else {
       let approved = true;
@@ -270,6 +279,24 @@
     if (detected.extra > 0) result.note = `[WMBX] Only the first call was executed; ${detected.extra} more were ignored. Send ONE call per message and wait for the result.`;
     if (obsolete()) { widget.log('err', `Result of ${call.name} discarded: there is already something newer in the chat (not sending it to avoid repetition).`); return; }
     const delivered = await guarded(deliver(srv, call, result), DELIVER_TIMEOUT_MS, 'The chat did not accept the result in time.');
+    await superviseDelivery({ detected, message: delivered.message, sentOk: delivered.ok });
+  }
+
+  /**
+   * v1.7.2 · `wmb.list_tools`: the AI browses the tool catalog by pages (50 each), by search or by detail.
+   * Resolved here, without any MCP and without asking permission (read-only). Delivered and supervised like any result.
+   */
+  async function handleMeta(detected) {
+    const { call } = detected;
+    const obsolete = () => detected.seq !== undefined && detected.seq !== callSeq;
+    const a = call.arguments ?? {};
+    const out = WMB.catalog.run(a, state.tools);
+    widget.log('ok', `Tool catalog${a.server ? ` › ${a.server}` : ''}${a.page ? ` · page ${a.page}` : ''}${a.query ? ` · «${a.query}»` : ''}${a.tool ? ` · ${a.tool}` : ''}`);
+    const result = { status: out.ok ? 'ok' : 'error', text: out.text };
+    if (detected.rerun) result.note = '[WMBX] Automatic resend: your previous message with the result did not get processed. This is the CURRENT result of your call; continue from here.';
+    if (detected.extra > 0) result.note = `[WMBX] Only the first call was executed; ${detected.extra} more were ignored. Send ONE call per message and wait for the result.`;
+    if (obsolete()) { widget.log('err', 'Catalog result discarded: there is already something newer in the chat.'); return; }
+    const delivered = await guarded(deliver({ slug: WMB.catalog.SERVER }, call, result), DELIVER_TIMEOUT_MS, 'The chat did not accept the result in time.');
     await superviseDelivery({ detected, message: delivered.message, sentOk: delivered.ok });
   }
 
