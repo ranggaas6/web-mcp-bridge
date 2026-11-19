@@ -301,8 +301,19 @@
     const before = dom.getText(el).length;
 
     if (append && hadText) {
-      document.execCommand('insertLineBreak');
-      document.execCommand('insertLineBreak');
+      document.execCommand('insertParagraph');
+      document.execCommand('insertParagraph');
+    }
+    // Fix: ProseMirror (claude.ai) expects real paragraphs. Paste the whole text in one native-like operation first.
+    if (el.classList?.contains('ProseMirror') && text) {
+      const base = dom.getText(el).length;
+      try {
+        const data = new DataTransfer();
+        data.setData('text/plain', text);
+        el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+        await WMB.sleep(150);
+        if (dom.getText(el).length > base + Math.min(text.length, 20) - 1) return true;
+      } catch { /* fall back to execCommand */ }
     }
     // v1.7.2: yield to the browser every 25 lines so a huge prompt does not freeze the page ("page unresponsive").
     const rows = text.split('\n');

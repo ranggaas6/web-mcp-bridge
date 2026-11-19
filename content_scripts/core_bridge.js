@@ -487,6 +487,31 @@
     }
   })();
 
+  // Fix: claude.ai may show «Respons ini gagal dimuat» and put the sent result back in the text box.
+  // The duplicate guards then block everything, so resubmit the stale draft ourselves (max 2 tries per delivery).
+  let loadRetries = 0;
+  let loadRetryDeliveries = -1;
+  let lastLoadRetryAt = 0;
+  (async () => {
+    while (WMB.extensionAlive()) {
+      await WMB.sleep(2000);
+      try {
+        if (!isActive() || !state.settings.autoSend || injecting) continue;
+        if (loadRetryDeliveries !== adapter.deliveries) { loadRetryDeliveries = adapter.deliveries; loadRetries = 0; }
+        if (!adapter.lastDeliveryAt || Date.now() - adapter.lastDeliveryAt > 10 * 60 * 1000) continue;
+        if (loadRetries >= 2 || Date.now() - lastLoadRetryAt < 8000) continue;
+        if (!adapter.hasLoadError() || !adapter.hasStaleDraft() || adapter.isStreaming()) continue;
+        loadRetries += 1;
+        lastLoadRetryAt = Date.now();
+        epoch += 1;
+        widget.log('err', `Chat reported a failed response and returned the result to the text box: resubmitting (${loadRetries}/2).`);
+        await adapter.submit(4000);
+      } catch (err) {
+        widget.log('err', `Load-error watcher: ${err?.message ?? err}`);
+      }
+    }
+  })();
+
   refresh().then(() => {
     adapter.observeResponses(
       (detected) => {

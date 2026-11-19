@@ -89,20 +89,25 @@
       let lastSig = '';
       let lastText = '';
       let lastDone = '';
+      let lastNudge = 0;
       let stableSince = Date.now();
       this.baselineUntil = Date.now() + BASELINE_MS;
 
       const schedule = (delay = DEBOUNCE_MS) => {
         if (scheduled) return;
         scheduled = true;
-        WMB.sleep(delay).then(() => { scheduled = false; if (alive) scan(); });
+        WMB.sleep(delay).then(() => {
+          scheduled = false;
+          if (!alive) return;
+          try { scan(); } catch (err) { this.debug?.('err', `Observer error: ${err?.message ?? err}`); }
+        });
       };
 
       const scan = () => {
         const now = Date.now();
         const streaming = this.isStreaming();
         const messages = this.getAssistantMessages();
-        if (this.lastDeliveryAt && (streaming || messages.length > this.msgsAtDelivery)) this.genSinceDelivery = true;
+        if (this.lastDeliveryAt && (streaming || messages.length > this.msgsAtDelivery || this.#textChangedSinceDelivery())) this.genSinceDelivery = true;
         if (streaming) {
           this.lastActivity = now;
           this.baselineUntil = 0;
@@ -136,7 +141,11 @@
             if (!baseline && element.__wmbFired && element.__wmbFired === WMB.hash(JSON.stringify(call))) { this.debug?.('err', 'Call ignored: this message already fired a call (duplicate blocked).'); return; }
             let id = `${this.getMessageKey(element, i)}#${n}:${WMB.hash(JSON.stringify(call))}`;
             if (this.executed.has(id)) {
-              if (baseline || i !== last || streaming || n !== 0 || !this.genSinceDelivery || i < this.msgsAtDelivery) return;
+              const stale = i < this.msgsAtDelivery && !this.#textChangedSinceDelivery();
+              if (baseline || i !== last || streaming || n !== 0 || !this.genSinceDelivery || stale) {
+                if (!baseline && i === last && !streaming) this.debug?.('err', `Call skipped (already executed): i=${i} last=${last} msgs=${messages.length} atDelivery=${this.msgsAtDelivery} gen=${this.genSinceDelivery}`);
+                return;
+              }
               id = `${id}~r${this.deliveries}`;
               if (this.executed.has(id)) return;
             }
@@ -184,8 +193,18 @@
             if (this.freshChat && Date.now() - this.lastActivity < FRESH_CHAT_MS) this.freshChat = false;
             else this.baselineUntil = Date.now() + BASELINE_MS;
           }
-          scan();
-          await this.#wakeIfStale();
+          try {
+            const sinceSend = Date.now() - this.lastSendAt;
+            if (this.pendingReply && sinceSend > 8000 && sinceSend < 90_000 && Date.now() - lastNudge > 10_000) {
+              lastNudge = Date.now();
+              lastSig = '';
+              this.debug?.('ok', `[diag] still waiting for a reply after ${Math.round(sinceSend / 1000)}s: forcing a rescan (streaming=${this.isStreaming()} msgs=${this.getAssistantMessages().length}).`);
+            }
+            scan();
+            await this.#wakeIfStale();
+          } catch (err) {
+            this.debug?.('err', `Observer error (loop kept alive): ${err?.message ?? err}`);
+          }
         }
       })();
 
@@ -262,6 +281,7 @@
       this.lastDeliveryAt = Date.now();
       this.genSinceDelivery = false;
       this.msgsAtDelivery = this.getAssistantMessages().length;
+      this.hashAtDelivery = WMB.hash(this.getLastText());
       this.#expectReply();
       try {
         if (await WMB.dom.purgeStale(composer)) this.debug?.('err', 'A stale result was still unsent in the text box: removed it to avoid duplication.');
@@ -310,10 +330,29 @@
       return this.#norm(WMB.dom.getText(composer)).includes(this.lastMarker);
     }
 
+    /** True when the chat shows a failed-response banner (e.g. «Respons ini gagal dimuat» / «Coba lagi» / «Retry»). */
+    hasLoadError() {
+      const bannerRe = /gagal dimuat|failed to load|couldn.?t load|could not load|something went wrong|terjadi kesalahan/i;
+      const retryRe = /^(coba lagi|retry|try again|réessayer|reintentar)$/i;
+      try {
+        for (const btn of document.querySelectorAll('button')) {
+          if (retryRe.test((btn.textContent || '').trim())) return true;
+        }
+        for (const el of document.querySelectorAll('[role="alert"], [data-testid*="error" i]')) {
+          if (bannerRe.test(el.textContent || '')) return true;
+        }
+      } catch { /* noop */ }
+      return false;
+    }
+
     hasReacted() {
       if (this.isStreaming()) return true;
       if (this.hasStaleDraft()) return false;
-      return this.genSinceDelivery || this.getAssistantMessages().length > this.msgsAtDelivery;
+      return this.genSinceDelivery || this.getAssistantMessages().length > this.msgsAtDelivery || this.#textChangedSinceDelivery();
+    }
+
+    #textChangedSinceDelivery() {
+      return this.hashAtDelivery !== undefined && WMB.hash(this.getLastText()) !== this.hashAtDelivery;
     }
 
     async #attemptSend(n, timeout) {
@@ -364,6 +403,7 @@
       const s = this.sendSnap;
       if (!s || s.path !== location.pathname) return true;
       if (!s.hashes.has(WMB.hash(String(text).trim()))) return true;
+      if (this.#textChangedSinceDelivery()) return true;
       return messages.length === s.count + 1;
     }
 
